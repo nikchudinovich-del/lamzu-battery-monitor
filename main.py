@@ -547,11 +547,15 @@ class LamzuTrayApp:
             dpi_list = [400, 800, 1200, 1600, 2400, 3200]
             items = []
             for d in dpi_list:
+                def make_handler(val):
+                    return lambda icon, it: self.set_quick_dpi(val)
+                def make_checker(val):
+                    return lambda it: self.cfg.get("current_dpi", 800) == val
                 items.append(
                     item(
                         f"{d} DPI",
-                        lambda icon, it, val=d: self.set_quick_dpi(val),
-                        checked=lambda it, val=d: self.cfg.get("current_dpi", 800) == val
+                        make_handler(d),
+                        checked=make_checker(d)
                     )
                 )
             return pystray.Menu(*items)
