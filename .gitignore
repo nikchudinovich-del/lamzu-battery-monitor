@@ -18,6 +18,8 @@ config.json
 
 # Scratch & research scripts
 scratch_*.py
+test_*.png
+*.exe
 
 # OS / Editor files
 .vscode/
