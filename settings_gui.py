@@ -1,7 +1,7 @@
 """
 Модуль графического интерфейса LAMZU Control Center & Performance Suite.
 Полный функционал оригинального ПО:
-- Профили (Profile 1-4)
+- Аппаратная оптимизация PAW3950 · 8K Nordic (Active Safe Profile)
 - 20K FPS, High-Speed / Competition Mode, Motion Sync
 - Debounce Time (0-20 мс)
 - Сетка этапов DPI (1-5 этапов), выбор активного этапа, X-Y Split, RGB цвет каждого этапа
@@ -42,7 +42,6 @@ from lamzu_battery import (
     get_mouse_ripple_control, set_mouse_ripple_control,
     get_mouse_angle_snap, set_mouse_angle_snap,
     get_mouse_angle_tune, set_mouse_angle_tune,
-    get_mouse_profile, set_mouse_profile,
     get_mouse_dpi_detailed, set_mouse_full_dpi,
     factory_reset_mouse, query_aurora_battery, get_control_device_path
 )
@@ -325,9 +324,6 @@ class LamzuControlSuiteGUI:
             d_at = get_mouse_angle_tune()
             if d_at is not None: self.cfg["angle_tune"] = d_at
 
-            d_prof = get_mouse_profile()
-            if d_prof is not None: self.cfg["profile_id"] = d_prof
-
             d_lod = get_mouse_lod()
             if d_lod is not None: self.cfg["mouse_lod"] = d_lod
 
@@ -395,31 +391,11 @@ class LamzuControlSuiteGUI:
             bg="#07080c"
         ).pack(side=tk.LEFT)
 
-        # Выбор активного профиля
-        prof_frame = tk.Frame(left, bg="#11141e", padx=6, pady=2, highlightbackground="#222838", highlightthickness=1)
-        prof_frame.pack(side=tk.LEFT, padx=(18, 0))
+        # Аппаратный статус сенсора
+        hw_badge = tk.Frame(left, bg="#11141e", padx=10, pady=3, highlightbackground="#222838", highlightthickness=1)
+        hw_badge.pack(side=tk.LEFT, padx=(18, 0))
 
-        tk.Label(prof_frame, text="ПРОФИЛЬ:", font=("Segoe UI", 8, "bold"), fg="#78829b", bg="#11141e").pack(side=tk.LEFT, padx=(2, 6))
-
-        self.prof_var = tk.IntVar(value=self.cfg.get("profile_id", 0))
-        for p_idx, p_name in enumerate(["1", "2", "3", "4"]):
-            btn = tk.Radiobutton(
-                prof_frame,
-                text=p_name,
-                value=p_idx,
-                variable=self.prof_var,
-                font=("Segoe UI", 8, "bold"),
-                fg="#ffffff",
-                bg="#11141e",
-                selectcolor="#00f09a",
-                indicatoron=False,
-                relief="flat",
-                padx=6,
-                pady=1,
-                cursor="hand2",
-                command=self.on_profile_switched
-            )
-            btn.pack(side=tk.LEFT, padx=1)
+        tk.Label(hw_badge, text="PAW3950 · 8K NORDIC", font=("Segoe UI", 8, "bold"), fg="#00f09a", bg="#11141e").pack(side=tk.LEFT)
 
         # Правая часть шапки: Батарея и Статус
         right = tk.Frame(header, bg="#07080c")
@@ -468,13 +444,6 @@ class LamzuControlSuiteGUI:
                         fg=color
                     ))
         threading.Thread(target=worker, daemon=True).start()
-
-    def on_profile_switched(self):
-        p_id = self.prof_var.get()
-        self.cfg["profile_id"] = p_id
-        self.auto_apply(f"Профиль {p_id + 1}", set_mouse_profile, p_id)
-        # Перечитываем настройки мыши для нового профиля
-        self.root.after(200, self.reload_all_tabs)
 
     def toggle_20k_fps(self):
         cur = not self.cfg.get("tracking_20k", False)

@@ -999,44 +999,6 @@ def set_mouse_angle_tune(angle: int, path: Optional[bytes] = None) -> bool:
         try: h.close()
         except Exception: pass
 
-def get_mouse_profile(path: Optional[bytes] = None) -> Optional[int]:
-    """Возвращает активный профиль (0..3)."""
-    p = path or get_control_device_path()
-    if not p: return None
-    r = send_aurora_cmd(p, 0, 133, 1, 0)
-    if r and len(r) > 8 and r[6] == 133:
-        return r[8]
-    return None
-
-def set_mouse_profile(prof_id: int, path: Optional[bytes] = None) -> bool:
-    """Переключает профиль (0 = Profile 1 .. 3 = Profile 4)."""
-    p = path or get_control_device_path()
-    if not p: return False
-    prof_id = max(0, min(3, int(prof_id)))
-    h = hid.device()
-    try:
-        h.open_path(p)
-        h.set_nonblocking(True)
-    except Exception:
-        new_p = get_control_device_path(force_refresh=True)
-        if not new_p: return False
-        try:
-            h.open_path(new_p)
-            h.set_nonblocking(True)
-        except Exception:
-            return False
-    try:
-        cmd = bytearray(65)
-        cmd[3]=2; cmd[4]=1; cmd[5]=0; cmd[6]=5; cmd[7]=prof_id
-        h.send_feature_report(cmd)
-        time.sleep(0.02)
-        return True
-    except Exception:
-        return False
-    finally:
-        try: h.close()
-        except Exception: pass
-
 def get_mouse_dpi_detailed(path: Optional[bytes] = None) -> Optional[Dict[str, Any]]:
     """Считывает подробную информацию по всем этапам DPI, активному этапу, цветам и X/Y split."""
     p = path or get_control_device_path()
@@ -1188,7 +1150,7 @@ def set_mouse_full_dpi(stages: list, active_idx: int, xy_split: bool = False, pa
         except Exception: pass
 
 def factory_reset_mouse(path: Optional[bytes] = None) -> bool:
-    """Выполняет аппаратный сброс мыши до заводских настроек (Factory Reset)."""
+    """Выполняет полный аппаратный сброс мыши LAMZU до заводских настроек и восстанавливает безопасные параметры."""
     p = path or get_control_device_path()
     if not p: return False
     h = hid.device()
@@ -1198,10 +1160,72 @@ def factory_reset_mouse(path: Optional[bytes] = None) -> bool:
     except Exception:
         return False
     try:
-        cmd = bytearray(65)
-        cmd[3]=2; cmd[4]=2; cmd[5]=0; cmd[6]=0; cmd[7]=192; cmd[8]=1
-        h.send_feature_report(cmd)
-        time.sleep(0.05)
+        def send(cmd):
+            h.send_feature_report(cmd)
+            time.sleep(0.02)
+
+        # 1. defaultDevice
+        cmd_def = bytearray(65)
+        cmd_def[3] = 2; cmd_def[4] = 2; cmd_def[5] = 0; cmd_def[6] = 0; cmd_def[7] = 192; cmd_def[8] = 1
+        send(cmd_def)
+
+        # 2. resetProfile for 0 and 1
+        for prof in (0, 1):
+            cmd_rp = bytearray(65)
+            cmd_rp[3] = 2; cmd_rp[4] = 1; cmd_rp[5] = 0; cmd_rp[6] = 13; cmd_rp[7] = prof
+            send(cmd_rp)
+
+        time.sleep(0.08)
+
+        # 3. Восстановление гарантированно рабочих параметров:
+        # LOD = 1.0 mm (code 1)
+        for prof in (1, 0):
+            cmd = bytearray(65); cmd[3]=2; cmd[4]=2; cmd[5]=1; cmd[6]=8; cmd[7]=prof; cmd[8]=1
+            send(cmd)
+
+        # Debounce = 4 ms
+        for prof in (1, 0):
+            cmd = bytearray(65); cmd[3]=2; cmd[4]=2; cmd[5]=0; cmd[6]=8; cmd[7]=prof; cmd[8]=4
+            send(cmd)
+
+        # Sleep Time = 60 s
+        for prof in (1, 0):
+            cmd = bytearray(65); cmd[3]=2; cmd[4]=3; cmd[5]=0; cmd[6]=7; cmd[7]=prof; cmd[8]=0; cmd[9]=60
+            send(cmd)
+
+        # Polling Rate = 1000 Hz
+        for prof in (1, 0):
+            cmd = bytearray(65); cmd[3]=2; cmd[4]=2; cmd[5]=1; cmd[6]=0; cmd[7]=prof; cmd[8]=1
+            send(cmd)
+
+        # Отключение Split XY, Angle Tune, Ripple, Snap
+        for prof in (1, 0):
+            cmd = bytearray(65); cmd[3]=2; cmd[4]=2; cmd[5]=1; cmd[6]=13; cmd[7]=prof; cmd[8]=0
+            send(cmd)
+            cmd = bytearray(65); cmd[3]=2; cmd[4]=2; cmd[5]=1; cmd[6]=20; cmd[7]=prof; cmd[8]=0
+            send(cmd)
+            cmd = bytearray(65); cmd[3]=2; cmd[4]=2; cmd[5]=1; cmd[6]=10; cmd[7]=prof; cmd[8]=0
+            send(cmd)
+            cmd = bytearray(65); cmd[3]=2; cmd[4]=2; cmd[5]=1; cmd[6]=4; cmd[7]=prof; cmd[8]=0
+            send(cmd)
+
+        # Стандартные этапы DPI: [800, 1200, 1600, 2400, 3200]
+        dpis = [800, 1200, 1600, 2400, 3200]
+        buf = bytearray()
+        for d in dpis:
+            buf.extend([(d >> 8) & 0xff, d & 0xff, (d >> 8) & 0xff, d & 0xff])
+
+        for prof in (1, 0):
+            cmd = bytearray(65)
+            cmd[3] = 2; cmd[4] = 2 + len(buf); cmd[5] = 1; cmd[6] = 1; cmd[7] = prof; cmd[8] = len(dpis)
+            cmd[9:9+len(buf)] = buf
+            send(cmd)
+
+        # Активация 800 DPI
+        for prof in (1, 0):
+            cmd = bytearray(65); cmd[3] = 2; cmd[4] = 2; cmd[5] = 1; cmd[6] = 2; cmd[7] = prof; cmd[8] = 0
+            send(cmd)
+
         return True
     except Exception:
         return False

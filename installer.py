@@ -132,6 +132,7 @@ def perform_install(progress_callback=None):
                 curr_c["card_number"] = "2204 3110 1790 0938"
                 curr_c["card_holder"] = "Яндекс Банк (СБП)"
                 curr_c["github_url"] = "https://github.com/nikchudinovich-del/lamzu-battery-monitor"
+                curr_c.pop("profile_id", None)
                 with open(dest_cfg, "w", encoding="utf-8") as f:
                     json.dump(curr_c, f, indent=2, ensure_ascii=False)
         except Exception:
