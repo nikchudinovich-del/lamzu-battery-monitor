@@ -1,7 +1,9 @@
 """
-Графический установщик для LAMZU Battery Monitor.
-Устанавливает приложение, добавляет в автозагрузку Windows,
-создает ярлыки на Рабочем столе и в меню Пуск, и сразу запускает в трее.
+Полностью автоматический графический установщик для LAMZU Battery Monitor.
+- Запускается в стильной тёмной теме (AMOLED Black).
+- Автоматически выполняет установку без необходимости нажимать кнопку «Установить».
+- Копирует файлы, настраивает автозагрузку с Windows, создает ярлык на Рабочем столе.
+- Мгновенно запускает приложение в трее и автоматически закрывается.
 """
 
 import os
@@ -11,6 +13,7 @@ import winreg
 import ctypes
 import subprocess
 import threading
+import time
 import tkinter as tk
 from tkinter import ttk, messagebox
 
@@ -18,6 +21,24 @@ APP_NAME = "LamzuBatteryTray"
 DISPLAY_NAME = "LAMZU Battery Monitor"
 RUN_REG_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 UNINSTALL_REG_KEY = rf"Software\Microsoft\Windows\CurrentVersion\Uninstall\{APP_NAME}"
+
+def enable_dark_title_bar(window):
+    """Включает нативную тёмную тему для заголовка окна Windows 10/11."""
+    try:
+        window.update_idletasks()
+        hwnd = ctypes.windll.user32.GetParent(window.winfo_id()) or window.winfo_id()
+        DWMWA_USE_IMMERSIVE_DARK_MODE = 20
+        DWMWA_USE_IMMERSIVE_DARK_MODE_BEFORE_20H1 = 19
+        val = ctypes.c_int(1)
+        res = ctypes.windll.dwmapi.DwmSetWindowAttribute(
+            hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, ctypes.byref(val), ctypes.sizeof(val)
+        )
+        if res != 0:
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE_BEFORE_20H1, ctypes.byref(val), ctypes.sizeof(val)
+            )
+    except Exception:
+        pass
 
 def get_bundle_dir():
     """Возвращает каталог с распакованными файлами инсталлятора."""
@@ -58,10 +79,11 @@ Shortcut.Save
                 pass
 
 def perform_install(progress_callback=None):
-    """Выполняет полную установку и настройку."""
+    """Выполняет полную автоматическую установку."""
     def log(msg, step):
         if progress_callback:
             progress_callback(msg, step)
+        time.sleep(0.08)
 
     log("Остановка предыдущих копий...", 15)
     kill_running_app()
@@ -75,7 +97,6 @@ def perform_install(progress_callback=None):
     dest_exe = os.path.join(install_dir, f"{APP_NAME}.exe")
 
     if not os.path.exists(source_exe):
-        # Fallback если запущен из исходников
         scratch_exe = r"C:\Users\NikCh\.gemini\antigravity\scratch\lamzu_battery_tray\LamzuBatteryTray.exe"
         if os.path.exists(scratch_exe):
             source_exe = scratch_exe
@@ -92,23 +113,30 @@ def perform_install(progress_callback=None):
     if os.path.exists(source_ico):
         shutil.copy2(source_ico, dest_ico)
 
-    log("Добавление в автозагрузку Windows...", 65)
+    # Копирование конфига, если его еще нет в папке установки
+    source_cfg = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+    dest_cfg = os.path.join(install_dir, "config.json")
+    if os.path.exists(source_cfg) and not os.path.exists(dest_cfg):
+        try:
+            shutil.copy2(source_cfg, dest_cfg)
+        except Exception:
+            pass
+
+    log("Настройка автозагрузки Windows...", 70)
     with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_REG_KEY, 0, winreg.KEY_WRITE) as key:
         winreg.SetValueEx(key, APP_NAME, 0, winreg.REG_SZ, f'"{dest_exe}"')
 
-    log("Создание ярлыков...", 80)
-    # 1. Рабочий стол
+    log("Создание ярлыков на Рабочем столе...", 85)
     desktop = os.path.join(os.environ['USERPROFILE'], 'Desktop')
     desktop_lnk = os.path.join(desktop, f"{DISPLAY_NAME}.lnk")
     create_windows_shortcut(dest_exe, desktop_lnk, dest_ico, DISPLAY_NAME)
 
-    # 2. Меню Пуск
     start_menu = os.path.join(os.environ.get('APPDATA', ''), r'Microsoft\Windows\Start Menu\Programs')
     if os.path.exists(start_menu):
         start_lnk = os.path.join(start_menu, f"{DISPLAY_NAME}.lnk")
         create_windows_shortcut(dest_exe, start_lnk, dest_ico, DISPLAY_NAME)
 
-    # Создаем скрипт деинсталляции
+    # Деинсталлятор
     uninstall_bat = os.path.join(install_dir, "Uninstall.bat")
     with open(uninstall_bat, "w", encoding="cp1251", errors="ignore") as f:
         f.write(f'''@echo off
@@ -131,116 +159,100 @@ pause
             close_fds=True
         )
 
-    log("Готово!", 100)
+    log("Установка успешно завершена!", 100)
     return True
 
-class InstallerGUI:
+class AutoInstallerGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("Установка LAMZU Battery Monitor")
-        self.root.geometry("480x360")
+        self.root.geometry("450x240")
         self.root.resizable(False, False)
-        self.root.configure(bg="#15171e")
+        self.root.configure(bg="#08090d")
 
-        # Центрирование окна
+        enable_dark_title_bar(root)
+
+        bundle_dir = get_bundle_dir()
+        ico = os.path.join(bundle_dir, "app_icon.ico")
+        if os.path.exists(ico):
+            try:
+                root.iconbitmap(ico)
+            except Exception:
+                pass
+
         self.center_window()
 
-        # Заголовок
-        header_frame = tk.Frame(root, bg="#15171e")
-        header_frame.pack(fill=tk.X, padx=24, pady=(24, 12))
+        # Шапка
+        header = tk.Frame(root, bg="#08090d", padx=24, pady=(20, 10))
+        header.pack(fill=tk.X)
 
         title_lbl = tk.Label(
-            header_frame,
+            header,
             text="LAMZU Battery Monitor",
-            font=("Segoe UI", 16, "bold"),
-            fg="#00e6a0",
-            bg="#15171e"
+            font=("Segoe UI", 14, "bold"),
+            fg="#00f09a",
+            bg="#08090d"
         )
         title_lbl.pack(anchor="w")
 
-        subtitle_lbl = tk.Label(
-            header_frame,
-            text="Индикатор заряда вашей мышки в трее Windows",
-            font=("Segoe UI", 10),
-            fg="#8c92a4",
-            bg="#15171e"
+        sub_lbl = tk.Label(
+            header,
+            text="Автоматическая установка и запуск в трее...",
+            font=("Segoe UI", 9),
+            fg="#788094",
+            bg="#08090d"
         )
-        subtitle_lbl.pack(anchor="w", pady=(2, 0))
+        sub_lbl.pack(anchor="w", pady=(2, 0))
 
-        # Карточка с информацией
-        card = tk.Frame(root, bg="#1f222d", padx=16, pady=14, relief="flat", highlightbackground="#2d3242", highlightthickness=1)
-        card.pack(fill=tk.X, padx=24, pady=10)
-
-        features = [
-            "✔  Точный процент заряда и цветовая индикация в трее",
-            "✔  3-этапное переключение кнопки снизу (1000 / 2000 / 4000 Гц)",
-            "✔  Защита от бага 0% при переходе мыши в спящий режим",
-            "✔  0% нагрузки в играх (пауза опроса и мгновенный Alt-Tab)",
-            "✔  Автозапуск при старте Windows и ярлык на Рабочем столе",
-        ]
-
-        for feat in features:
-            f_lbl = tk.Label(card, text=feat, font=("Segoe UI", 9), fg="#e1e4ea", bg="#1f222d")
-            f_lbl.pack(anchor="w", pady=2)
-
-        # Статус и прогресс
+        # Статус
         self.status_lbl = tk.Label(
             root,
-            text="Нажмите «Установить» для начала автоматической установки",
-            font=("Segoe UI", 9),
-            fg="#9ba3b8",
-            bg="#15171e"
+            text="Подготовка к установке...",
+            font=("Segoe UI", 9, "bold"),
+            fg="#e1e6f2",
+            bg="#08090d"
         )
-        self.status_lbl.pack(fill=tk.X, padx=24, pady=(16, 6))
+        self.status_lbl.pack(anchor="w", padx=24, pady=(10, 6))
 
         # Стиль прогрессбара
         style = ttk.Style()
         style.theme_use('clam')
-        style.configure("Custom.Horizontal.TProgressbar", foreground='#00e6a0', background='#00e6a0', troughcolor='#202430', bordercolor='#15171e', lightcolor='#00e6a0', darkcolor='#00e6a0')
-
-        self.progress = ttk.Progressbar(root, orient="horizontal", length=432, mode="determinate", style="Custom.Horizontal.TProgressbar")
-        self.progress.pack(padx=24, pady=(0, 20))
-
-        # Кнопки
-        btn_frame = tk.Frame(root, bg="#15171e")
-        btn_frame.pack(fill=tk.X, padx=24, pady=(0, 20))
-
-        self.install_btn = tk.Button(
-            btn_frame,
-            text="Установить сейчас",
-            font=("Segoe UI", 10, "bold"),
-            fg="#0b0d12",
-            bg="#00e6a0",
-            activeforeground="#0b0d12",
-            activebackground="#00c88c",
-            relief="flat",
-            padx=20,
-            pady=8,
-            cursor="hand2",
-            command=self.start_install
+        style.configure(
+            "Auto.Horizontal.TProgressbar",
+            foreground='#00f09a',
+            background='#00f09a',
+            troughcolor='#151822',
+            bordercolor='#08090d',
+            lightcolor='#00f09a',
+            darkcolor='#00f09a'
         )
-        self.install_btn.pack(side=tk.RIGHT)
 
-        self.close_btn = tk.Button(
-            btn_frame,
-            text="Отмена",
-            font=("Segoe UI", 10),
-            fg="#8c92a4",
-            bg="#232733",
-            activeforeground="#ffffff",
-            activebackground="#2e3342",
-            relief="flat",
-            padx=16,
-            pady=8,
-            cursor="hand2",
-            command=self.root.destroy
+        self.progress = ttk.Progressbar(
+            root,
+            orient="horizontal",
+            length=402,
+            mode="determinate",
+            style="Auto.Horizontal.TProgressbar"
         )
-        self.close_btn.pack(side=tk.RIGHT, padx=(0, 10))
+        self.progress.pack(padx=24, pady=(0, 14))
+
+        # Нижняя подсказка
+        self.footer_lbl = tk.Label(
+            root,
+            text="Пожалуйста, подождите, всё происходит автоматически...",
+            font=("Segoe UI", 8),
+            fg="#596075",
+            bg="#08090d"
+        )
+        self.footer_lbl.pack(anchor="w", padx=24)
+
+        # Автоматический старт установки через 200 мс после отрисовки окна
+        self.root.after(200, self.start_auto_install)
 
     def center_window(self):
         self.root.update_idletasks()
-        w = 480
-        h = 360
+        w = 450
+        h = 240
         x = (self.root.winfo_screenwidth() // 2) - (w // 2)
         y = (self.root.winfo_screenheight() // 2) - (h // 2)
         self.root.geometry(f"{w}x{h}+{x}+{y}")
@@ -250,10 +262,7 @@ class InstallerGUI:
         self.progress["value"] = val
         self.root.update_idletasks()
 
-    def start_install(self):
-        self.install_btn.config(state=tk.DISABLED, text="Установка...")
-        self.close_btn.config(state=tk.DISABLED)
-
+    def start_auto_install(self):
         def worker():
             try:
                 perform_install(self.update_progress)
@@ -264,15 +273,14 @@ class InstallerGUI:
         threading.Thread(target=worker, daemon=True).start()
 
     def on_success(self):
-        self.status_lbl.config(text="✔ Установка завершена! Программа запущена в трее.", fg="#00e6a0")
-        self.install_btn.config(state=tk.NORMAL, text="Готово", command=self.root.destroy, bg="#00e6a0")
-        self.close_btn.pack_forget()
+        self.status_lbl.config(text="✔ Установка завершена! Значок активен в трее.", fg="#00f09a")
+        self.footer_lbl.config(text="Окно закроется автоматически через секунду...")
+        # Автоматическое закрытие окна через 1.2 секунды
+        self.root.after(1200, self.root.destroy)
 
     def on_error(self, err):
         self.status_lbl.config(text=f"Ошибка: {err}", fg="#ff4d4d")
         messagebox.showerror("Ошибка установки", f"Не удалось завершить установку:\n{err}")
-        self.install_btn.config(state=tk.NORMAL, text="Повторить")
-        self.close_btn.config(state=tk.NORMAL)
 
 def main():
     if "--silent" in sys.argv:
@@ -280,7 +288,7 @@ def main():
         return
 
     root = tk.Tk()
-    app = InstallerGUI(root)
+    app = AutoInstallerGUI(root)
     root.mainloop()
 
 if __name__ == "__main__":
