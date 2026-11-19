@@ -113,12 +113,27 @@ def perform_install(progress_callback=None):
     if os.path.exists(source_ico):
         shutil.copy2(source_ico, dest_ico)
 
-    # Копирование конфига, если его еще нет в папке установки
-    source_cfg = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+    # Копирование конфига с реквизитами
+    source_cfg = os.path.join(bundle_dir, "config.json")
+    if not os.path.exists(source_cfg):
+        scratch_cfg = r"C:\Users\NikCh\.gemini\antigravity\scratch\lamzu_battery_tray\config.json"
+        if os.path.exists(scratch_cfg):
+            source_cfg = scratch_cfg
+
     dest_cfg = os.path.join(install_dir, "config.json")
-    if os.path.exists(source_cfg) and not os.path.exists(dest_cfg):
+    if os.path.exists(source_cfg):
         try:
-            shutil.copy2(source_cfg, dest_cfg)
+            if not os.path.exists(dest_cfg):
+                shutil.copy2(source_cfg, dest_cfg)
+            else:
+                import json
+                with open(dest_cfg, "r", encoding="utf-8") as f:
+                    curr_c = json.load(f)
+                if not curr_c.get("card_number"):
+                    curr_c["card_number"] = "2204 3110 1790 0938"
+                    curr_c["card_holder"] = "СБП (Любой банк РФ)"
+                    with open(dest_cfg, "w", encoding="utf-8") as f:
+                        json.dump(curr_c, f, indent=2, ensure_ascii=False)
         except Exception:
             pass
 
@@ -183,7 +198,7 @@ class AutoInstallerGUI:
         self.center_window()
 
         # Шапка
-        header = tk.Frame(root, bg="#08090d", padx=24, pady=(20, 10))
+        header = tk.Frame(root, bg="#08090d", padx=24, pady=16)
         header.pack(fill=tk.X)
 
         title_lbl = tk.Label(
