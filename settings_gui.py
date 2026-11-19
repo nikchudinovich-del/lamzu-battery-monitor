@@ -1,28 +1,50 @@
 """
-Модуль графического интерфейса настроек LAMZU Battery & Polling Rate Monitor.
-Глубокая черная тема (AMOLED Dark), нативная тёмная панель Windows 11/10,
-управление DPI, высотой отрыва (LOD), тайм-аутом сна мыши, цветом светодиода (LED),
-а также неизменяемые реквизиты автора Яндекс Банка (СБП) для поддержки проекта.
+Модуль графического интерфейса LAMZU Control Center & Performance Suite.
+Полный функционал оригинального ПО:
+- Профили (Profile 1-4)
+- 20K FPS, High-Speed / Competition Mode, Motion Sync
+- Debounce Time (0-20 мс)
+- Сетка этапов DPI (1-5 этапов), выбор активного этапа, X-Y Split, RGB цвет каждого этапа
+- Polling Rate (125, 250, 500, 1000, 2000, 4000, 8000 Гц)
+- Ripple Control, Angle Snap, Angle Tune (-30°..+30°)
+- Высота отрыва (LOD 0.7, 1.0, 2.0 мм), Тайм-аут сна (10с..30мин)
+- Factory Reset
+- Встроенный Polling Rate Tester в реальном времени (Live Hz Benchmark)
+- Монитор здоровья батареи и оценка времени игры
+- Game Optimizer (0% задержек в играх)
+- Защищенные реквизиты автора Яндекс Банк (СБП) и кнопка GitHub
+- АВТОМАТИЧЕСКОЕ ПРИМЕНЕНИЕ (AUTO-APPLY) на лету без кнопки «Сохранить»!
 """
 
 import os
 import sys
+import time
 import ctypes
+import threading
 import webbrowser
+from datetime import datetime
+from typing import Optional, Callable, Dict, Any, List
+
 import tkinter as tk
 from tkinter import ttk, messagebox, colorchooser
-from typing import Optional, Callable
 
 from config import load_config, save_config, CARD_NUMBER, CARD_HOLDER, GITHUB_URL
 from lamzu_battery import (
-    get_mouse_lod,
-    set_mouse_lod,
-    get_mouse_sleep_time,
-    set_mouse_sleep_time,
-    get_mouse_dpi,
-    set_mouse_dpi,
-    get_mouse_led_color,
-    set_mouse_led_color
+    get_mouse_polling_rate, set_mouse_polling_rate,
+    get_mouse_hyper_mode, set_mouse_hyper_mode,
+    get_mouse_tracking_mode, set_mouse_tracking_mode,
+    get_mouse_lod, set_mouse_lod,
+    get_mouse_sleep_time, set_mouse_sleep_time,
+    get_mouse_dpi, set_mouse_dpi,
+    get_mouse_led_color, set_mouse_led_color,
+    get_mouse_debounce, set_mouse_debounce,
+    get_mouse_motion_sync, set_mouse_motion_sync,
+    get_mouse_ripple_control, set_mouse_ripple_control,
+    get_mouse_angle_snap, set_mouse_angle_snap,
+    get_mouse_angle_tune, set_mouse_angle_tune,
+    get_mouse_profile, set_mouse_profile,
+    get_mouse_dpi_detailed, set_mouse_full_dpi,
+    factory_reset_mouse, query_aurora_battery, get_control_device_path
 )
 
 def enable_dark_title_bar(window):
@@ -54,21 +76,20 @@ def get_icon_path():
     scratch_p = r"C:\Users\NikCh\.gemini\antigravity\scratch\lamzu_battery_tray\app_icon.ico"
     return scratch_p if os.path.exists(scratch_p) else None
 
-def format_card_number(raw_num: str) -> str:
-    """Форматирует номер карты блоками по 4 цифры."""
-    clean = "".join(c for c in raw_num if c.isdigit())
-    if not clean:
-        clean = "2204311017900938"
-    return " ".join(clean[i:i+4] for i in range(0, len(clean), 4))
-
 def rgb_to_hex(r: int, g: int, b: int) -> str:
-    return f"#{r:02x}{g:02x}{b:02x}"
+    return f"#{int(r):02x}{int(g):02x}{int(b):02x}"
 
 def hex_to_rgb(hex_str: str) -> tuple:
     hex_str = hex_str.lstrip('#')
     return tuple(int(hex_str[i:i+2], 16) for i in (0, 2, 4))
 
-def show_donation_dialog(parent=None, cfg: dict = None, on_save_callback: Optional[Callable[[dict], None]] = None):
+def format_card_number(raw_num: str) -> str:
+    clean = "".join(c for c in raw_num if c.isdigit())
+    if not clean:
+        clean = "2204311017900938"
+    return " ".join(clean[i:i+4] for i in range(0, len(clean), 4))
+
+def show_donation_dialog(parent=None, cfg: dict = None):
     """Окно поддержки / пожертвований с фиксированным номером карты Яндекс Банка автора и кнопкой копирования."""
     is_standalone = False
     if parent is None:
@@ -101,7 +122,6 @@ def show_donation_dialog(parent=None, cfg: dict = None, on_save_callback: Option
         y = (dlg.winfo_screenheight() // 2) - 180
     dlg.geometry(f"480x360+{x}+{y}")
 
-    # Заголовок
     header = tk.Frame(dlg, bg="#08090d", padx=24, pady=16)
     header.pack(fill=tk.X)
 
@@ -122,7 +142,6 @@ def show_donation_dialog(parent=None, cfg: dict = None, on_save_callback: Option
         justify="left"
     ).pack(anchor="w", pady=(4, 0))
 
-    # Виртуальная банковская карта (Obsidian Black Card)
     card_frame = tk.Frame(dlg, bg="#11141d", padx=18, pady=14, highlightbackground="#222738", highlightthickness=1)
     card_frame.pack(fill=tk.X, padx=24, pady=(0, 14))
 
@@ -167,7 +186,6 @@ def show_donation_dialog(parent=None, cfg: dict = None, on_save_callback: Option
         bg="#11141d"
     ).pack(anchor="w")
 
-    # Статус копирования
     copy_status_lbl = tk.Label(dlg, text="", font=("Segoe UI", 9, "bold"), fg="#00f09a", bg="#08090d")
     copy_status_lbl.pack(pady=(0, 4))
 
@@ -201,7 +219,6 @@ def show_donation_dialog(parent=None, cfg: dict = None, on_save_callback: Option
     )
     copy_btn.pack(fill=tk.X)
 
-    # Разделитель и кнопка закрытия
     sep = tk.Frame(dlg, bg="#181c26", height=1)
     sep.pack(fill=tk.X, padx=24, pady=(16, 12))
 
@@ -234,589 +251,1136 @@ def show_donation_dialog(parent=None, cfg: dict = None, on_save_callback: Option
     if is_standalone:
         dlg.mainloop()
 
-def show_settings_dialog(on_saved_callback: Optional[Callable[[dict], None]] = None, apply_stage_callback: Optional[Callable[[int], None]] = None):
-    """Главное окно настроек в глубокой черной теме (AMOLED Dark). Настройки применяются ТОЛЬКО по нажатию Сохранить."""
-    root = tk.Tk()
-    root.title("LAMZU Maya X — Настройки мыши и производительности")
-    root.geometry("600x740")
-    root.minsize(560, 600)
-    root.configure(bg="#08090d")
+class LamzuControlSuiteGUI:
+    def __init__(self, root, on_change_callback: Optional[Callable[[str, Any], None]] = None):
+        self.root = root
+        self.on_change_callback = on_change_callback
+        self.root.title("LAMZU Maya X — Control Center & Performance Suite")
+        self.root.geometry("1060x720")
+        self.root.minsize(980, 640)
+        self.root.configure(bg="#07080c")
 
-    ico = get_icon_path()
-    if ico:
+        enable_dark_title_bar(root)
+        ico = get_icon_path()
+        if ico:
+            try:
+                root.iconbitmap(ico)
+            except Exception:
+                pass
+
+        self.cfg = load_config()
+        self.active_tab = "performance"
+        self._slider_job = None
+
+        # Состояние тестера герцовки
+        self.tester_active = False
+        self.hz_history = []
+        self.last_mouse_time = None
+        self.peak_hz = 0
+        self.avg_hz = 0
+        self.live_hz = 0
+
+        # Считываем текущее аппаратное состояние с мыши
+        self.read_live_mouse_state()
+
+        # Построение UI
+        self.create_header()
+        self.create_navigation()
+
+        self.container = tk.Frame(self.root, bg="#07080c")
+        self.container.pack(fill=tk.BOTH, expand=True, padx=20, pady=(6, 6))
+
+        self.create_footer()
+
+        # Показываем вкладку по умолчанию
+        self.switch_tab("performance")
+
+    def read_live_mouse_state(self):
+        """Считывает текущие аппаратные параметры мыши."""
         try:
-            root.iconbitmap(ico)
+            dpi_info = get_mouse_dpi_detailed()
+            if dpi_info:
+                self.cfg["active_dpi_stage"] = dpi_info.get("active_index", self.cfg.get("active_dpi_stage", 2))
+                self.cfg["xy_split"] = dpi_info.get("xy_split", False)
+                if dpi_info.get("stages"):
+                    self.cfg["dpi_stages"] = dpi_info["stages"]
+                    self.cfg["stage_count"] = len(dpi_info["stages"])
+
+            d_rate = get_mouse_polling_rate()
+            if d_rate: self.cfg["polling_rate"] = d_rate
+            else: self.cfg["polling_rate"] = 1000
+
+            d_deb = get_mouse_debounce()
+            if d_deb is not None: self.cfg["debounce_time"] = d_deb
+
+            d_ms = get_mouse_motion_sync()
+            if d_ms is not None: self.cfg["motion_sync"] = d_ms
+
+            d_rc = get_mouse_ripple_control()
+            if d_rc is not None: self.cfg["ripple_control"] = d_rc
+
+            d_as = get_mouse_angle_snap()
+            if d_as is not None: self.cfg["angle_snap"] = d_as
+
+            d_at = get_mouse_angle_tune()
+            if d_at is not None: self.cfg["angle_tune"] = d_at
+
+            d_prof = get_mouse_profile()
+            if d_prof is not None: self.cfg["profile_id"] = d_prof
+
+            d_lod = get_mouse_lod()
+            if d_lod is not None: self.cfg["mouse_lod"] = d_lod
+
+            d_sl = get_mouse_sleep_time()
+            if d_sl is not None: self.cfg["mouse_sleep_time"] = d_sl
+
+            d_hyp = get_mouse_hyper_mode()
+            if d_hyp is not None: self.cfg["hyper_mode"] = (d_hyp == 1)
+
+            d_tr = get_mouse_tracking_mode()
+            if d_tr is not None: self.cfg["tracking_20k"] = (d_tr == 1)
+
         except Exception:
             pass
 
-    enable_dark_title_bar(root)
-
-    root.update_idletasks()
-    x = max(0, (root.winfo_screenwidth() // 2) - 300)
-    y = max(0, (root.winfo_screenheight() // 2) - 370)
-    root.geometry(f"600x740+{x}+{y}")
-
-    cfg = load_config()
-
-    # Считываем текущее состояние с мыши ТОЛЬКО для начального отображения в UI (без перезаписи на мышь!)
-    live_lod = get_mouse_lod()
-    live_sleep = get_mouse_sleep_time()
-    live_dpi = get_mouse_dpi()
-    live_led = get_mouse_led_color()
-
-    current_lod = live_lod if live_lod is not None else cfg.get("mouse_lod", 1.0)
-    current_sleep = live_sleep if live_sleep is not None else cfg.get("mouse_sleep_time", 60)
-    current_dpi = live_dpi if live_dpi is not None else cfg.get("current_dpi", 800)
-    current_led = live_led if live_led is not None else tuple(cfg.get("led_color", [0, 240, 154]))
-
-    # --- ШАПКА ОКНА (Фиксированная) ---
-    header = tk.Frame(root, bg="#08090d")
-    header.pack(fill=tk.X, padx=22, pady=(12, 6))
-
-    title_frame = tk.Frame(header, bg="#08090d")
-    title_frame.pack(fill=tk.X)
-
-    tk.Label(
-        title_frame,
-        text="LAMZU Maya X Control",
-        font=("Segoe UI", 14, "bold"),
-        fg="#ffffff",
-        bg="#08090d"
-    ).pack(side=tk.LEFT)
-
-    status_badge = tk.Label(
-        title_frame,
-        text=" 8K Dongle Active ",
-        font=("Segoe UI", 8, "bold"),
-        fg="#00f09a",
-        bg="#0e241b",
-        padx=7,
-        pady=2
-    )
-    status_badge.pack(side=tk.RIGHT)
-
-    tk.Label(
-        header,
-        text="Управление DPI, высотой отрыва (LOD), сном, подсветкой и 3-мя этапами кнопки",
-        font=("Segoe UI", 9),
-        fg="#72798e",
-        bg="#08090d"
-    ).pack(anchor="w", pady=(2, 0))
-
-    # --- СКРОЛЛИРУЕМЫЙ КОНТЕЙНЕР КАРТОЧЕК ---
-    canvas_container = tk.Frame(root, bg="#08090d")
-    canvas_container.pack(fill=tk.BOTH, expand=True, padx=(22, 10), pady=(0, 6))
-
-    canvas = tk.Canvas(canvas_container, bg="#08090d", highlightthickness=0)
-    scrollbar = tk.Scrollbar(canvas_container, orient="vertical", command=canvas.yview, bg="#0f1118")
-    content = tk.Frame(canvas, bg="#08090d")
-
-    canvas_window = canvas.create_window((0, 0), window=content, anchor="nw")
-
-    def configure_scroll(event):
-        canvas.configure(scrollregion=canvas.bbox("all"))
-
-    def configure_canvas(event):
-        canvas.itemconfig(canvas_window, width=event.width)
-
-    content.bind("<Configure>", configure_scroll)
-    canvas.bind("<Configure>", configure_canvas)
-    canvas.configure(yscrollcommand=scrollbar.set)
-
-    canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-    scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-
-    def on_mousewheel(event):
-        if canvas.winfo_exists():
-            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-
-    def bind_tree_wheel(w):
-        w.bind("<MouseWheel>", on_mousewheel)
-        for child in w.winfo_children():
-            bind_tree_wheel(child)
-
-    root.bind("<Destroy>", lambda e: canvas.unbind_all("<MouseWheel>") if e.widget == root else None)
-
-    # ==================== КАРТОЧКА 1: 3 ЭТАПА КНОПКИ ПОД МЫШКОЙ ====================
-    c_btn = tk.Frame(content, bg="#0f1118", padx=12, pady=10, highlightbackground="#1d212e", highlightthickness=1)
-    c_btn.pack(fill=tk.X, pady=(0, 8))
-
-    tk.Label(
-        c_btn,
-        text="Циклическое переключение кнопкой под мышкой (3 этапа)",
-        font=("Segoe UI", 9, "bold"),
-        fg="#00f09a",
-        bg="#0f1118"
-    ).pack(anchor="w", pady=(0, 6))
-
-    # Этап 1
-    s1_row = tk.Frame(c_btn, bg="#0f1118")
-    s1_row.pack(fill=tk.X, pady=(2, 4))
-    tk.Label(s1_row, text="1", font=("Segoe UI", 8, "bold"), fg="#090a0f", bg="#00f09a", padx=4, pady=1).pack(side=tk.LEFT, padx=(0, 6))
-    tk.Label(s1_row, text="Киберспорт (High-Speed):", font=("Segoe UI", 9), fg="#00f09a", bg="#0f1118", width=22, anchor="w").pack(side=tk.LEFT)
-    s1_rate_var = tk.IntVar(value=cfg.get("stage1_rate", 2000))
-    for r in [1000, 2000, 4000, 8000]:
-        tk.Radiobutton(
-            s1_row, text=f"{r} Гц", value=r, variable=s1_rate_var,
-            font=("Segoe UI", 9), fg="#ffffff", bg="#0f1118", selectcolor="#06070a",
-            activebackground="#0f1118", activeforeground="#00f09a", highlightthickness=0, cursor="hand2"
-        ).pack(side=tk.LEFT, padx=(0, 6))
-
-    # Этап 2
-    s2_row = tk.Frame(c_btn, bg="#0f1118")
-    s2_row.pack(fill=tk.X, pady=(2, 4))
-    tk.Label(s2_row, text="2", font=("Segoe UI", 8, "bold"), fg="#090a0f", bg="#00b4ff", padx=4, pady=1).pack(side=tk.LEFT, padx=(0, 6))
-    tk.Label(s2_row, text="20K FPS Экстрим:", font=("Segoe UI", 9), fg="#00b4ff", bg="#0f1118", width=22, anchor="w").pack(side=tk.LEFT)
-    s2_rate_var = tk.IntVar(value=cfg.get("stage2_rate", 4000))
-    for r in [2000, 4000, 8000]:
-        tk.Radiobutton(
-            s2_row, text=f"{r} Гц", value=r, variable=s2_rate_var,
-            font=("Segoe UI", 9), fg="#ffffff", bg="#0f1118", selectcolor="#06070a",
-            activebackground="#0f1118", activeforeground="#00b4ff", highlightthickness=0, cursor="hand2"
-        ).pack(side=tk.LEFT, padx=(0, 6))
-
-    # Этап 3
-    s0_row = tk.Frame(c_btn, bg="#0f1118")
-    s0_row.pack(fill=tk.X, pady=(2, 2))
-    tk.Label(s0_row, text="3", font=("Segoe UI", 8, "bold"), fg="#ffffff", bg="#373c4d", padx=4, pady=1).pack(side=tk.LEFT, padx=(0, 6))
-    tk.Label(s0_row, text="Обычный (Выключение):", font=("Segoe UI", 9), fg="#c9cfdf", bg="#0f1118", width=22, anchor="w").pack(side=tk.LEFT)
-    s0_rate_var = tk.IntVar(value=cfg.get("stage0_rate", 1000))
-    for r in [500, 1000, 2000]:
-        tk.Radiobutton(
-            s0_row, text=f"{r} Гц", value=r, variable=s0_rate_var,
-            font=("Segoe UI", 9), fg="#ffffff", bg="#0f1118", selectcolor="#06070a",
-            activebackground="#0f1118", activeforeground="#00f09a", highlightthickness=0, cursor="hand2"
-        ).pack(side=tk.LEFT, padx=(0, 6))
-
-    # ==================== КАРТОЧКА 2: НАСТРОЙКИ СЕНСОРА (DPI И ВЫСОТА ОТРЫВА LOD) ====================
-    c_sensor = tk.Frame(content, bg="#0f1118", padx=12, pady=10, highlightbackground="#1d212e", highlightthickness=1)
-    c_sensor.pack(fill=tk.X, pady=(0, 8))
-
-    sensor_head = tk.Frame(c_sensor, bg="#0f1118")
-    sensor_head.pack(fill=tk.X, pady=(0, 6))
-
-    tk.Label(
-        sensor_head,
-        text="Сенсор: Разрешение (DPI) и Высота отрыва (LOD)",
-        font=("Segoe UI", 9, "bold"),
-        fg="#a855f7",
-        bg="#0f1118"
-    ).pack(side=tk.LEFT)
-
-    tk.Label(
-        sensor_head,
-        text="PixArt PAW3950",
-        font=("Segoe UI", 8, "bold"),
-        fg="#798299",
-        bg="#0f1118"
-    ).pack(side=tk.RIGHT)
-
-    # DPI
-    dpi_row = tk.Frame(c_sensor, bg="#0f1118")
-    dpi_row.pack(fill=tk.X, pady=(2, 4))
-
-    tk.Label(dpi_row, text="DPI сенсора:", font=("Segoe UI", 9), fg="#c8cedb", bg="#0f1118", width=14, anchor="w").pack(side=tk.LEFT)
-
-    dpi_presets = [400, 800, 1200, 1600, 2400, 3200]
-    dpi_var = tk.IntVar(value=current_dpi)
-    custom_dpi_var = tk.StringVar(value=str(current_dpi))
-
-    def on_dpi_preset_selected():
-        custom_dpi_var.set(str(dpi_var.get()))
-
-    for val in dpi_presets:
-        tk.Radiobutton(
-            dpi_row, text=f"{val}", value=val, variable=dpi_var,
-            font=("Segoe UI", 9), fg="#ffffff", bg="#0f1118", selectcolor="#06070a",
-            activebackground="#0f1118", activeforeground="#a855f7", highlightthickness=0, cursor="hand2",
-            command=on_dpi_preset_selected
-        ).pack(side=tk.LEFT, padx=(0, 6))
-
-    custom_frame = tk.Frame(c_sensor, bg="#0f1118")
-    custom_frame.pack(fill=tk.X, pady=(2, 6))
-
-    tk.Label(custom_frame, text="Свой DPI:", font=("Segoe UI", 9), fg="#939ba8", bg="#0f1118", width=14, anchor="w").pack(side=tk.LEFT)
-
-    custom_entry = tk.Entry(
-        custom_frame,
-        textvariable=custom_dpi_var,
-        font=("Consolas", 9, "bold"),
-        fg="#a855f7",
-        bg="#171924",
-        insertbackground="#a855f7",
-        width=10,
-        relief="flat",
-        highlightbackground="#242838",
-        highlightthickness=1
-    )
-    custom_entry.pack(side=tk.LEFT, ipady=2, padx=(0, 8))
-
-    def on_custom_entry_change(*args):
-        try:
-            val = int(custom_dpi_var.get())
-            if 50 <= val <= 30000:
-                dpi_var.set(val)
-        except ValueError:
-            pass
-
-    custom_dpi_var.trace_add("write", on_custom_entry_change)
-
-    tk.Label(
-        custom_frame,
-        text="(от 50 до 30 000 DPI, X и Y строго синхронны)",
-        font=("Segoe UI", 8),
-        fg="#6b7280",
-        bg="#0f1118"
-    ).pack(side=tk.LEFT)
-
-    # Высота отрыва (LOD)
-    lod_row = tk.Frame(c_sensor, bg="#0f1118")
-    lod_row.pack(fill=tk.X, pady=(4, 2))
-
-    tk.Label(lod_row, text="Высота отрыва (LOD):", font=("Segoe UI", 9), fg="#c8cedb", bg="#0f1118", width=18, anchor="w").pack(side=tk.LEFT)
-
-    lod_var = tk.DoubleVar(value=round(float(current_lod), 1))
-    lod_options = [
-        (0.7, "0.7 мм (Низкая)"),
-        (1.0, "1.0 мм (Стандарт)"),
-        (2.0, "2.0 мм (Высокая)")
-    ]
-    for val, text in lod_options:
-        tk.Radiobutton(
-            lod_row, text=text, value=val, variable=lod_var,
-            font=("Segoe UI", 9), fg="#ffffff", bg="#0f1118", selectcolor="#06070a",
-            activebackground="#0f1118", activeforeground="#a855f7", highlightthickness=0, cursor="hand2"
-        ).pack(side=tk.LEFT, padx=(0, 8))
-
-    # ==================== КАРТОЧКА 3: ПОДСВЕТКА / ЦВЕТ СВЕТОДИОДА ====================
-    c_led = tk.Frame(content, bg="#0f1118", padx=12, pady=10, highlightbackground="#1d212e", highlightthickness=1)
-    c_led.pack(fill=tk.X, pady=(0, 8))
-
-    led_head = tk.Frame(c_led, bg="#0f1118")
-    led_head.pack(fill=tk.X, pady=(0, 6))
-
-    tk.Label(
-        led_head,
-        text="Подсветка: Цвет светодиода мыши (LED RGB)",
-        font=("Segoe UI", 9, "bold"),
-        fg="#00e6a0",
-        bg="#0f1118"
-    ).pack(side=tk.LEFT)
-
-    selected_rgb = [current_led[0], current_led[1], current_led[2]]
-    current_hex = rgb_to_hex(selected_rgb[0], selected_rgb[1], selected_rgb[2])
-
-    led_row = tk.Frame(c_led, bg="#0f1118")
-    led_row.pack(fill=tk.X, pady=(2, 4))
-
-    # Квадратный индикатор выбранного цвета
-    color_preview = tk.Label(
-        led_row,
-        text="    ",
-        bg=current_hex,
-        relief="solid",
-        bd=1,
-        width=3,
-        height=1
-    )
-    color_preview.pack(side=tk.LEFT, padx=(0, 10))
-
-    color_hex_lbl = tk.Label(
-        led_row,
-        text=current_hex.upper(),
-        font=("Consolas", 9, "bold"),
-        fg="#ffffff",
-        bg="#0f1118",
-        width=8
-    )
-    color_hex_lbl.pack(side=tk.LEFT, padx=(0, 12))
-
-    def update_led_color(r, g, b):
-        selected_rgb[0] = r
-        selected_rgb[1] = g
-        selected_rgb[2] = b
-        new_hex = rgb_to_hex(r, g, b)
-        color_preview.config(bg=new_hex)
-        color_hex_lbl.config(text=new_hex.upper())
-
-    # Быстрые пресеты популярных цветов
-    presets = [
-        ("Неон", 0, 240, 154, "#00f09a"),
-        ("Циан", 0, 180, 255, "#00b4ff"),
-        ("Фиолет", 168, 85, 247, "#a855f7"),
-        ("Красный", 255, 51, 102, "#ff3366"),
-        ("Янтарь", 255, 184, 46, "#ffb82e"),
-        ("Белый", 255, 255, 255, "#ffffff")
-    ]
-
-    for name, pr, pg, pb, phex in presets:
-        btn = tk.Button(
-            led_row,
-            text=name,
-            font=("Segoe UI", 8, "bold"),
-            fg="#08090d" if phex in ("#00f09a", "#ffb82e", "#ffffff") else "#ffffff",
-            bg=phex,
-            activebackground=phex,
-            relief="flat",
-            cursor="hand2",
-            padx=6,
-            pady=2,
-            command=lambda r=pr, g=pg, b=pb: update_led_color(r, g, b)
-        )
-        btn.pack(side=tk.LEFT, padx=(0, 5))
-
-    def choose_custom_color():
-        chosen = colorchooser.askcolor(
-            color=rgb_to_hex(selected_rgb[0], selected_rgb[1], selected_rgb[2]),
-            title="Выберите цвет светодиода мыши"
-        )
-        if chosen and chosen[0]:
-            r, g, b = int(chosen[0][0]), int(chosen[0][1]), int(chosen[0][2])
-            update_led_color(r, g, b)
-
-    custom_color_btn = tk.Button(
-        led_row,
-        text="Палитра...",
-        font=("Segoe UI", 8),
-        fg="#c8cedb",
-        bg="#1c202d",
-        activebackground="#2a3044",
-        activeforeground="#ffffff",
-        relief="flat",
-        cursor="hand2",
-        padx=7,
-        pady=2,
-        command=choose_custom_color
-    )
-    custom_color_btn.pack(side=tk.LEFT, padx=(4, 0))
-
-    # ==================== КАРТОЧКА 4: ЭНЕРГОСБЕРЕЖЕНИЕ (ВРЕМЯ ДО СНА) ====================
-    c_sleep = tk.Frame(content, bg="#0f1118", padx=12, pady=10, highlightbackground="#1d212e", highlightthickness=1)
-    c_sleep.pack(fill=tk.X, pady=(0, 8))
-
-    sleep_head = tk.Frame(c_sleep, bg="#0f1118")
-    sleep_head.pack(fill=tk.X, pady=(0, 6))
-
-    tk.Label(
-        sleep_head,
-        text="Энергосбережение: Время до перехода в спящий режим",
-        font=("Segoe UI", 9, "bold"),
-        fg="#38bdf8",
-        bg="#0f1118"
-    ).pack(side=tk.LEFT)
-
-    sleep_row = tk.Frame(c_sleep, bg="#0f1118")
-    sleep_row.pack(fill=tk.X, pady=(2, 2))
-
-    tk.Label(sleep_row, text="Таймаут сна:", font=("Segoe UI", 9), fg="#c8cedb", bg="#0f1118", width=14, anchor="w").pack(side=tk.LEFT)
-
-    sleep_var = tk.IntVar(value=int(current_sleep))
-    sleep_presets = [
-        (10, "10 сек"),
-        (30, "30 сек"),
-        (60, "1 мин"),
-        (300, "5 мин"),
-        (600, "10 мин"),
-        (1800, "30 мин")
-    ]
-    for sec_val, sec_lbl in sleep_presets:
-        tk.Radiobutton(
-            sleep_row, text=sec_lbl, value=sec_val, variable=sleep_var,
-            font=("Segoe UI", 9), fg="#ffffff", bg="#0f1118", selectcolor="#06070a",
-            activebackground="#0f1118", activeforeground="#38bdf8", highlightthickness=0, cursor="hand2"
-        ).pack(side=tk.LEFT, padx=(0, 8))
-
-    # ==================== КАРТОЧКА 5: ОПТИМИЗАЦИЯ В ИГРАХ ====================
-    c_perf = tk.Frame(content, bg="#0f1118", padx=12, pady=10, highlightbackground="#1d212e", highlightthickness=1)
-    c_perf.pack(fill=tk.X, pady=(0, 4))
-
-    tk.Label(
-        c_perf,
-        text="Оптимизация производительности в играх",
-        font=("Segoe UI", 9, "bold"),
-        fg="#ffb82e",
-        bg="#0f1118"
-    ).pack(anchor="w", pady=(0, 4))
-
-    pause_game_var = tk.BooleanVar(value=cfg.get("pause_in_game", True))
-    tk.Checkbutton(
-        c_perf,
-        text="Отключать опрос в играх (0% задержек и нагрузки, авто-опрос при Alt-Tab)",
-        variable=pause_game_var,
-        font=("Segoe UI", 9),
-        fg="#d8dde8",
-        bg="#0f1118",
-        selectcolor="#06070a",
-        activebackground="#0f1118",
-        activeforeground="#00f09a",
-        highlightthickness=0,
-        cursor="hand2"
-    ).pack(anchor="w", pady=(1, 3))
-
-    int_frame = tk.Frame(c_perf, bg="#0f1118")
-    int_frame.pack(fill=tk.X, pady=(1, 3))
-
-    tk.Label(int_frame, text="Интервал обновления:", font=("Segoe UI", 9), fg="#939ba8", bg="#0f1118").pack(side=tk.LEFT, padx=(0, 10))
-    poll_int_var = tk.IntVar(value=cfg.get("poll_interval", 30))
-    for sec in [30, 60, 120]:
-        tk.Radiobutton(
-            int_frame,
-            text=f"{sec} сек",
-            value=sec,
-            variable=poll_int_var,
-            font=("Segoe UI", 9),
+    # =========================================================================
+    # AUTO-APPLY SYSTEM (МГНОВЕННОЕ АВТОМАТИЧЕСКОЕ ПРИМЕНЕНИЕ)
+    # =========================================================================
+    def auto_apply(self, param_name: str, setter_func: Callable, *args):
+        """Мгновенно применяет настройку к мыши в фоне и сохраняет конфиг."""
+        def worker():
+            try:
+                setter_func(*args)
+            except Exception as e:
+                print(f"Error applying {param_name}: {e}")
+
+        threading.Thread(target=worker, daemon=True).start()
+        save_config(self.cfg)
+        self.show_toast(f"✔ Применено: {param_name}")
+
+        if self.on_change_callback:
+            try:
+                self.on_change_callback(param_name, args[0] if args else None)
+            except Exception:
+                pass
+
+    def show_toast(self, text: str):
+        now_time = datetime.now().strftime("%H:%M:%S")
+        self.toast_lbl.config(text=f"[{now_time}] {text}", fg="#00f09a")
+        self.root.after(3000, lambda: self.toast_lbl.config(text="Все изменения применяются мгновенно на лету", fg="#4e5870"))
+
+    # =========================================================================
+    # HEADER & NAVIGATION
+    # =========================================================================
+    def create_header(self):
+        header = tk.Frame(self.root, bg="#07080c", padx=20, pady=12)
+        header.pack(fill=tk.X)
+
+        left = tk.Frame(header, bg="#07080c")
+        left.pack(side=tk.LEFT)
+
+        tk.Label(
+            left,
+            text="LAMZU",
+            font=("Segoe UI", 16, "bold"),
+            fg="#00f09a",
+            bg="#07080c"
+        ).pack(side=tk.LEFT)
+
+        tk.Label(
+            left,
+            text=" Maya X Control Studio",
+            font=("Segoe UI", 14),
             fg="#ffffff",
-            bg="#0f1118",
-            selectcolor="#06070a",
-            activebackground="#0f1118",
+            bg="#07080c"
+        ).pack(side=tk.LEFT)
+
+        # Выбор активного профиля
+        prof_frame = tk.Frame(left, bg="#11141e", padx=6, pady=2, highlightbackground="#222838", highlightthickness=1)
+        prof_frame.pack(side=tk.LEFT, padx=(18, 0))
+
+        tk.Label(prof_frame, text="ПРОФИЛЬ:", font=("Segoe UI", 8, "bold"), fg="#78829b", bg="#11141e").pack(side=tk.LEFT, padx=(2, 6))
+
+        self.prof_var = tk.IntVar(value=self.cfg.get("profile_id", 0))
+        for p_idx, p_name in enumerate(["1", "2", "3", "4"]):
+            btn = tk.Radiobutton(
+                prof_frame,
+                text=p_name,
+                value=p_idx,
+                variable=self.prof_var,
+                font=("Segoe UI", 8, "bold"),
+                fg="#ffffff",
+                bg="#11141e",
+                selectcolor="#00f09a",
+                indicatoron=False,
+                relief="flat",
+                padx=6,
+                pady=1,
+                cursor="hand2",
+                command=self.on_profile_switched
+            )
+            btn.pack(side=tk.LEFT, padx=1)
+
+        # Правая часть шапки: Батарея и Статус
+        right = tk.Frame(header, bg="#07080c")
+        right.pack(side=tk.RIGHT)
+
+        # Плашка 20K FPS
+        self.fps_badge = tk.Label(
+            right,
+            text=" 20K FPS: ВКЛ " if self.cfg.get("tracking_20k") else " 20K FPS: ВЫКЛ ",
+            font=("Segoe UI", 8, "bold"),
+            fg="#c084fc" if self.cfg.get("tracking_20k") else "#5a6275",
+            bg="#1d152b" if self.cfg.get("tracking_20k") else "#12141c",
+            padx=8,
+            pady=3,
+            cursor="hand2"
+        )
+        self.fps_badge.pack(side=tk.LEFT, padx=(0, 10))
+        self.fps_badge.bind("<Button-1>", lambda e: self.toggle_20k_fps())
+
+        # Плашка батареи
+        self.bat_frame = tk.Frame(right, bg="#10131c", padx=10, pady=3, highlightbackground="#1e2433", highlightthickness=1)
+        self.bat_frame.pack(side=tk.LEFT)
+
+        self.bat_lbl = tk.Label(
+            self.bat_frame,
+            text="🔋 Батарея: ...%",
+            font=("Segoe UI", 9, "bold"),
+            fg="#00f09a",
+            bg="#10131c"
+        )
+        self.bat_lbl.pack(side=tk.LEFT)
+
+        self.update_header_battery()
+
+    def update_header_battery(self):
+        def worker():
+            p = get_control_device_path()
+            if p:
+                res = query_aurora_battery(p)
+                if res:
+                    bat, st = res
+                    st_str = "⚡ Зарядка" if st == 1 else "Разряжается"
+                    color = "#00f09a" if bat > 25 else "#ff4d6d"
+                    self.root.after(0, lambda: self.bat_lbl.config(
+                        text=f"🔋 {bat}% ({st_str})",
+                        fg=color
+                    ))
+        threading.Thread(target=worker, daemon=True).start()
+
+    def on_profile_switched(self):
+        p_id = self.prof_var.get()
+        self.cfg["profile_id"] = p_id
+        self.auto_apply(f"Профиль {p_id + 1}", set_mouse_profile, p_id)
+        # Перечитываем настройки мыши для нового профиля
+        self.root.after(200, self.reload_all_tabs)
+
+    def toggle_20k_fps(self):
+        cur = not self.cfg.get("tracking_20k", False)
+        self.cfg["tracking_20k"] = cur
+        self.fps_badge.config(
+            text=" 20K FPS: ВКЛ " if cur else " 20K FPS: ВЫКЛ ",
+            fg="#c084fc" if cur else "#5a6275",
+            bg="#1d152b" if cur else "#12141c"
+        )
+        self.auto_apply("Режим 20K FPS", set_mouse_tracking_mode, cur)
+
+    def create_navigation(self):
+        nav = tk.Frame(self.root, bg="#07080c", padx=20)
+        nav.pack(fill=tk.X)
+
+        self.tab_buttons = {}
+        tabs = [
+            ("performance", "⚡ ПРОИЗВОДИТЕЛЬНОСТЬ (DPI & Частота)"),
+            ("customize", "🖱 КАСТОМИЗАЦИЯ & СЕНСОР"),
+            ("tools", "📈 ТЕСТЕР ГЕРЦОВКИ & ИНСТРУМЕНТЫ"),
+            ("support", "💖 РАЗРАБОТЧИК & ДОНАТЫ")
+        ]
+
+        for tab_id, tab_title in tabs:
+            btn = tk.Button(
+                nav,
+                text=tab_title,
+                font=("Segoe UI", 9, "bold"),
+                fg="#737e96",
+                bg="#0d1017",
+                activebackground="#141824",
+                activeforeground="#ffffff",
+                relief="flat",
+                cursor="hand2",
+                padx=16,
+                pady=8,
+                command=lambda t=tab_id: self.switch_tab(t)
+            )
+            btn.pack(side=tk.LEFT, padx=(0, 4))
+            self.tab_buttons[tab_id] = btn
+
+    def switch_tab(self, tab_id: str):
+        self.active_tab = tab_id
+        for t, btn in self.tab_buttons.items():
+            if t == tab_id:
+                btn.config(bg="#181e2e", fg="#00f09a", highlightbackground="#00f09a", highlightthickness=1)
+            else:
+                btn.config(bg="#0d1017", fg="#737e96", highlightthickness=0)
+
+        for w in self.container.winfo_children():
+            w.destroy()
+
+        if tab_id == "performance":
+            self.render_performance_tab()
+        elif tab_id == "customize":
+            self.render_customize_tab()
+        elif tab_id == "tools":
+            self.render_tools_tab()
+        elif tab_id == "support":
+            self.render_support_tab()
+
+    def reload_all_tabs(self):
+        self.read_live_mouse_state()
+        self.switch_tab(self.active_tab)
+
+    # =========================================================================
+    # TAB 1: ПРОИЗВОДИТЕЛЬНОСТЬ (PERFORMANCE)
+    # =========================================================================
+    def render_performance_tab(self):
+        panes = tk.Frame(self.container, bg="#07080c")
+        panes.pack(fill=tk.BOTH, expand=True)
+
+        left_col = tk.Frame(panes, bg="#07080c")
+        left_col.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 8))
+
+        right_col = tk.Frame(panes, bg="#07080c")
+        right_col.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(8, 0))
+
+        # --- КАРТОЧКА 1: ЧАСТОТА ОПРОСА (POLLING RATE) ---
+        c_rate = tk.Frame(left_col, bg="#0f121a", padx=16, pady=14, highlightbackground="#1a202e", highlightthickness=1)
+        c_rate.pack(fill=tk.X, pady=(0, 10))
+
+        tk.Label(c_rate, text="Частота опроса (Polling Rate)", font=("Segoe UI", 11, "bold"), fg="#ffffff", bg="#0f121a").pack(anchor="w")
+        tk.Label(c_rate, text="Частота обновления позиции мыши в секунду (Гц):", font=("Segoe UI", 8), fg="#6d768a", bg="#0f121a").pack(anchor="w", pady=(1, 8))
+
+        rates = [500, 1000, 2000, 4000, 8000]
+        cur_rate = self.cfg.get("polling_rate", 1000)
+        self.rate_var = tk.IntVar(value=cur_rate)
+
+        r_row = tk.Frame(c_rate, bg="#0f121a")
+        r_row.pack(fill=tk.X)
+
+        for hz in rates:
+            color = "#00f09a" if hz <= 1000 else ("#00b4ff" if hz <= 2000 else "#a855f7")
+            btn = tk.Radiobutton(
+                r_row,
+                text=f"{hz} Гц",
+                value=hz,
+                variable=self.rate_var,
+                font=("Segoe UI", 9, "bold"),
+                fg="#ffffff",
+                bg="#171b26",
+                selectcolor=color,
+                indicatoron=False,
+                relief="flat",
+                cursor="hand2",
+                padx=12,
+                pady=6,
+                command=self.on_rate_changed
+            )
+            btn.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
+
+        # --- КАРТОЧКА 2: СЕТКА ЭТАПОВ DPI ---
+        c_dpi = tk.Frame(left_col, bg="#0f121a", padx=16, pady=14, highlightbackground="#1a202e", highlightthickness=1)
+        c_dpi.pack(fill=tk.BOTH, expand=True)
+
+        dpi_head = tk.Frame(c_dpi, bg="#0f121a")
+        dpi_head.pack(fill=tk.X, pady=(0, 6))
+
+        tk.Label(dpi_head, text="Сетка этапов DPI", font=("Segoe UI", 11, "bold"), fg="#ffffff", bg="#0f121a").pack(side=tk.LEFT)
+
+        # Переключатель X-Y Split
+        self.xy_split_var = tk.BooleanVar(value=self.cfg.get("xy_split", False))
+        tk.Checkbutton(
+            dpi_head,
+            text="Раздельный X-Y DPI",
+            variable=self.xy_split_var,
+            font=("Segoe UI", 9),
+            fg="#9aa3b5",
+            bg="#0f121a",
+            selectcolor="#07080c",
+            activebackground="#0f121a",
             activeforeground="#00f09a",
             highlightthickness=0,
-            cursor="hand2"
-        ).pack(side=tk.LEFT, padx=(0, 8))
+            cursor="hand2",
+            command=self.on_xy_split_toggled
+        ).pack(side=tk.RIGHT)
 
-    notify_var = tk.BooleanVar(value=cfg.get("notify_on_switch", True))
-    tk.Checkbutton(
-        c_perf,
-        text="Всплывающее уведомление Windows при переключении режима",
-        variable=notify_var,
-        font=("Segoe UI", 9),
-        fg="#d8dde8",
-        bg="#0f1118",
-        selectcolor="#06070a",
-        activebackground="#0f1118",
-        activeforeground="#00f09a",
-        highlightthickness=0,
-        cursor="hand2"
-    ).pack(anchor="w", pady=(1, 0))
+        stages = self.cfg.get("dpi_stages", [
+            {"x": 800, "y": 800, "color": [255, 51, 102]},
+            {"x": 1200, "y": 1200, "color": [0, 240, 154]},
+            {"x": 1600, "y": 1600, "color": [0, 180, 255]},
+            {"x": 2400, "y": 2400, "color": [168, 85, 247]},
+            {"x": 3200, "y": 3200, "color": [255, 184, 46]}
+        ])
+        active_idx = self.cfg.get("active_dpi_stage", 2)
 
-    bind_tree_wheel(content)
+        # Карточки этапов
+        self.stage_cards_frame = tk.Frame(c_dpi, bg="#0f121a")
+        self.stage_cards_frame.pack(fill=tk.X, pady=(4, 10))
 
-    # ==================== НИЖНЯЯ ПАНЕЛЬ (Фиксированная) ====================
-    footer = tk.Frame(root, bg="#08090d")
-    footer.pack(fill=tk.X, padx=22, pady=(8, 12))
+        self.stage_btn_widgets = []
+        for idx, s in enumerate(stages):
+            is_active = (idx == active_idx)
+            card = tk.Frame(
+                self.stage_cards_frame,
+                bg="#1c2130" if is_active else "#12151f",
+                padx=8,
+                pady=6,
+                highlightbackground="#ff3366" if is_active else "#222738",
+                highlightthickness=2 if is_active else 1,
+                cursor="hand2"
+            )
+            card.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=3)
+            card.bind("<Button-1>", lambda e, i=idx: self.select_dpi_stage(i))
 
-    left_actions = tk.Frame(footer, bg="#08090d")
-    left_actions.pack(side=tk.LEFT)
+            top_row = tk.Frame(card, bg=card["bg"])
+            top_row.pack(fill=tk.X)
 
-    def on_preview_donation():
-        show_donation_dialog(root, cfg)
+            # Цветовой индикатор этапа
+            c_rgb = s.get("color", [0, 240, 154])
+            hex_c = rgb_to_hex(*c_rgb)
+            swatch = tk.Label(top_row, text="  ", bg=hex_c, font=("Segoe UI", 4), cursor="hand2")
+            swatch.pack(side=tk.LEFT)
+            swatch.bind("<Button-1>", lambda e, i=idx: self.pick_stage_color(i))
 
-    def on_github_click():
-        webbrowser.open(GITHUB_URL)
+            lbl_title = tk.Label(top_row, text=f" Этап {idx+1}", font=("Segoe UI", 8, "bold"), fg="#ffffff" if is_active else "#717a8e", bg=card["bg"])
+            lbl_title.pack(side=tk.LEFT)
+            lbl_title.bind("<Button-1>", lambda e, i=idx: self.select_dpi_stage(i))
 
-    donate_btn = tk.Button(
-        left_actions,
-        text="💖 Поддержать автора",
-        font=("Segoe UI", 9, "bold"),
-        fg="#ffffff",
-        bg="#ff3366",
-        activebackground="#d62252",
-        activeforeground="#ffffff",
-        relief="flat",
-        cursor="hand2",
-        padx=10,
-        pady=5,
-        command=on_preview_donation
-    )
-    donate_btn.pack(side=tk.LEFT, padx=(0, 8))
+            dpi_val_str = f"{s['x']}" if not self.xy_split_var.get() else f"X:{s['x']}\nY:{s['y']}"
+            val_lbl = tk.Label(card, text=dpi_val_str, font=("Segoe UI", 10, "bold"), fg="#ff3366" if is_active else "#b5bdcf", bg=card["bg"])
+            val_lbl.pack(pady=(4, 0))
+            val_lbl.bind("<Button-1>", lambda e, i=idx: self.select_dpi_stage(i))
 
-    github_btn = tk.Button(
-        left_actions,
-        text="GitHub",
-        font=("Segoe UI", 9),
-        fg="#b5bac9",
-        bg="#161822",
-        activebackground="#222636",
-        activeforeground="#ffffff",
-        relief="flat",
-        cursor="hand2",
-        padx=10,
-        pady=5,
-        command=on_github_click
-    )
-    github_btn.pack(side=tk.LEFT)
+        # Ползунок регулировки DPI активного этапа
+        cur_stage = stages[active_idx] if active_idx < len(stages) else stages[0]
+        sl_box = tk.Frame(c_dpi, bg="#0f121a")
+        sl_box.pack(fill=tk.X, pady=(6, 0))
 
-    right_actions = tk.Frame(footer, bg="#08090d")
-    right_actions.pack(side=tk.RIGHT)
+        tk.Label(sl_box, text=f"Регулировка DPI для активного этапа {active_idx + 1}:", font=("Segoe UI", 9, "bold"), fg="#e1e7f5", bg="#0f121a").pack(anchor="w")
 
-    def on_save():
-        # Считываем целевой DPI
-        try:
-            chosen_dpi = int(custom_dpi_var.get().strip())
-        except ValueError:
-            chosen_dpi = dpi_var.get()
-        chosen_dpi = max(50, min(30000, chosen_dpi))
+        # X DPI Slider
+        x_row = tk.Frame(sl_box, bg="#0f121a")
+        x_row.pack(fill=tk.X, pady=(4, 2))
+        tk.Label(x_row, text="X DPI:", font=("Segoe UI", 9, "bold"), fg="#ff3366", bg="#0f121a", width=6, anchor="w").pack(side=tk.LEFT)
+        self.dpi_x_scale = ttk.Scale(x_row, from_=100, to=30000, value=cur_stage['x'], orient=tk.HORIZONTAL)
+        self.dpi_x_scale.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=8)
+        self.dpi_x_lbl = tk.Label(x_row, text=f"{cur_stage['x']}", font=("Segoe UI", 9, "bold"), fg="#ffffff", bg="#0f121a", width=6)
+        self.dpi_x_lbl.pack(side=tk.RIGHT)
+        self.dpi_x_scale.bind("<Motion>", self.on_x_slider_motion)
+        self.dpi_x_scale.bind("<ButtonRelease-1>", self.on_dpi_slider_release)
 
-        chosen_lod = round(float(lod_var.get()), 1)
-        chosen_sleep = int(sleep_var.get())
-        chosen_led = [selected_rgb[0], selected_rgb[1], selected_rgb[2]]
+        # Y DPI Slider (виден только при X-Y Split)
+        self.y_row = tk.Frame(sl_box, bg="#0f121a")
+        if self.xy_split_var.get():
+            self.y_row.pack(fill=tk.X, pady=(2, 2))
+        tk.Label(self.y_row, text="Y DPI:", font=("Segoe UI", 9, "bold"), fg="#00b4ff", bg="#0f121a", width=6, anchor="w").pack(side=tk.LEFT)
+        self.dpi_y_scale = ttk.Scale(self.y_row, from_=100, to=30000, value=cur_stage['y'], orient=tk.HORIZONTAL)
+        self.dpi_y_scale.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=8)
+        self.dpi_y_lbl = tk.Label(self.y_row, text=f"{cur_stage['y']}", font=("Segoe UI", 9, "bold"), fg="#ffffff", bg="#0f121a", width=6)
+        self.dpi_y_lbl.pack(side=tk.RIGHT)
+        self.dpi_y_scale.bind("<Motion>", self.on_y_slider_motion)
+        self.dpi_y_scale.bind("<ButtonRelease-1>", self.on_dpi_slider_release)
 
-        new_cfg = dict(cfg)
-        new_cfg.update({
-            "stage1_rate": s1_rate_var.get(),
-            "stage1_mode": "high_speed",
-            "stage2_rate": s2_rate_var.get(),
-            "stage2_mode": "20k",
-            "stage0_rate": s0_rate_var.get(),
-            "stage0_mode": "normal",
-            "current_dpi": chosen_dpi,
-            "mouse_lod": chosen_lod,
-            "mouse_sleep_time": chosen_sleep,
-            "led_color": chosen_led,
-            "pause_in_game": pause_game_var.get(),
-            "poll_interval": poll_int_var.get(),
-            "auto_sync_button": True,
-            "notify_on_switch": notify_var.get(),
-            "card_number": CARD_NUMBER,
-            "card_holder": CARD_HOLDER,
-            "github_url": GITHUB_URL
-        })
-        save_config(new_cfg)
+        # Быстрые пресеты
+        presets_row = tk.Frame(c_dpi, bg="#0f121a")
+        presets_row.pack(fill=tk.X, pady=(8, 0))
+        tk.Label(presets_row, text="Пресеты:", font=("Segoe UI", 8), fg="#717a8e", bg="#0f121a").pack(side=tk.LEFT, padx=(0, 6))
+        for p_val in [400, 800, 1200, 1600, 2400, 3200, 6400]:
+            btn = tk.Button(
+                presets_row, text=f"{p_val}", font=("Segoe UI", 8),
+                fg="#b5bdcf", bg="#191c26", activebackground="#2a3042", relief="flat", padx=6, pady=1, cursor="hand2",
+                command=lambda v=p_val: self.apply_quick_preset_dpi(v)
+            )
+            btn.pack(side=tk.LEFT, padx=2)
 
-        # ПРИМЕНЯЕМ НАСТРОЙКИ К МЫШИ ТОЛЬКО ЗДЕСЬ, КОГДА ПОЛЬЗОВАТЕЛЬ НАЖАЛ СОХРАНИТЬ
-        try:
-            set_mouse_dpi(chosen_dpi)
-            set_mouse_lod(chosen_lod)
-            set_mouse_sleep_time(chosen_sleep)
-            set_mouse_led_color(chosen_led[0], chosen_led[1], chosen_led[2])
-        except Exception:
-            pass
+        # --- КАРТОЧКА 3: ВЫСОТА ОТРЫВА (LOD) & ВРЕМЯ СНА ---
+        c_lod_sleep = tk.Frame(right_col, bg="#0f121a", padx=16, pady=14, highlightbackground="#1a202e", highlightthickness=1)
+        c_lod_sleep.pack(fill=tk.X, pady=(0, 10))
 
-        if on_saved_callback:
-            on_saved_callback(new_cfg)
-        root.destroy()
+        # LOD
+        tk.Label(c_lod_sleep, text="Высота отрыва (Lift-off Distance)", font=("Segoe UI", 11, "bold"), fg="#ffffff", bg="#0f121a").pack(anchor="w")
+        tk.Label(c_lod_sleep, text="Расстояние от коврика, на котором сенсор перестает считывать:", font=("Segoe UI", 8), fg="#6d768a", bg="#0f121a").pack(anchor="w", pady=(1, 6))
 
-    cancel_btn = tk.Button(
-        right_actions,
-        text="Отмена",
-        font=("Segoe UI", 9),
-        fg="#858da3",
-        bg="#161822",
-        activebackground="#222636",
-        activeforeground="#ffffff",
-        relief="flat",
-        cursor="hand2",
-        padx=12,
-        pady=5,
-        command=root.destroy
-    )
-    cancel_btn.pack(side=tk.RIGHT, padx=(6, 0))
+        lod_row = tk.Frame(c_lod_sleep, bg="#0f121a")
+        lod_row.pack(fill=tk.X, pady=(0, 12))
+        self.lod_var = tk.DoubleVar(value=self.cfg.get("mouse_lod", 1.0))
+        for lod_v, lod_name in [(0.7, "0.7 мм (Low)"), (1.0, "1.0 мм (Default)"), (2.0, "2.0 мм (High)")]:
+            tk.Radiobutton(
+                lod_row, text=lod_name, value=lod_v, variable=self.lod_var,
+                font=("Segoe UI", 9, "bold"), fg="#ffffff", bg="#171b26", selectcolor="#00f09a",
+                indicatoron=False, relief="flat", cursor="hand2", padx=10, pady=5,
+                command=self.on_lod_changed
+            ).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
 
-    save_btn = tk.Button(
-        right_actions,
-        text="Сохранить",
-        font=("Segoe UI", 9, "bold"),
-        fg="#08090d",
-        bg="#00f09a",
-        activebackground="#00c880",
-        relief="flat",
-        cursor="hand2",
-        padx=16,
-        pady=5,
-        command=on_save
-    )
-    save_btn.pack(side=tk.RIGHT)
+        # Сон
+        tk.Label(c_lod_sleep, text="Тайм-аут спящего режима", font=("Segoe UI", 11, "bold"), fg="#ffffff", bg="#0f121a").pack(anchor="w")
+        tk.Label(c_lod_sleep, text="Время бездействия мыши до перехода в режим энергосбережения:", font=("Segoe UI", 8), fg="#6d768a", bg="#0f121a").pack(anchor="w", pady=(1, 6))
 
+        sleep_row = tk.Frame(c_lod_sleep, bg="#0f121a")
+        sleep_row.pack(fill=tk.X)
+        self.sleep_var = tk.IntVar(value=self.cfg.get("mouse_sleep_time", 60))
+        for sec_v, sec_name in [(10, "10 с"), (30, "30 с"), (60, "1 мин"), (300, "5 мин"), (600, "10 мин"), (1800, "30 мин")]:
+            tk.Radiobutton(
+                sleep_row, text=sec_name, value=sec_v, variable=self.sleep_var,
+                font=("Segoe UI", 8, "bold"), fg="#ffffff", bg="#171b26", selectcolor="#00b4ff",
+                indicatoron=False, relief="flat", cursor="hand2", padx=4, pady=4,
+                command=self.on_sleep_changed
+            ).pack(side=tk.LEFT, expand=True, fill=tk.X, padx=1)
+
+        # --- КАРТОЧКА 4: ТОЧНЫЕ НАСТРОЙКИ СЕНСОРА (ANGLE SNAP, RIPPLE, TUNE) ---
+        c_sens = tk.Frame(right_col, bg="#0f121a", padx=16, pady=14, highlightbackground="#1a202e", highlightthickness=1)
+        c_sens.pack(fill=tk.BOTH, expand=True)
+
+        tk.Label(c_sens, text="Аппаратная коррекция сенсора", font=("Segoe UI", 11, "bold"), fg="#ffffff", bg="#0f121a").pack(anchor="w", pady=(0, 6))
+
+        # Checkboxes
+        self.ripple_var = tk.BooleanVar(value=self.cfg.get("ripple_control", False))
+        tk.Checkbutton(
+            c_sens,
+            text="Ripple Control (сглаживание микро-джиттера на высоких DPI >5000)",
+            variable=self.ripple_var,
+            font=("Segoe UI", 9), fg="#e1e6f2", bg="#0f121a", selectcolor="#07080c",
+            activebackground="#0f121a", activeforeground="#00f09a", highlightthickness=0, cursor="hand2",
+            command=self.on_ripple_changed
+        ).pack(anchor="w", pady=2)
+
+        self.snap_var = tk.BooleanVar(value=self.cfg.get("angle_snap", False))
+        tk.Checkbutton(
+            c_sens,
+            text="Angle Snap (аппаратная доводка прямых линий)",
+            variable=self.snap_var,
+            font=("Segoe UI", 9), fg="#e1e6f2", bg="#0f121a", selectcolor="#07080c",
+            activebackground="#0f121a", activeforeground="#00f09a", highlightthickness=0, cursor="hand2",
+            command=self.on_snap_changed
+        ).pack(anchor="w", pady=2)
+
+        # Angle Tune (-30..+30)
+        tune_box = tk.Frame(c_sens, bg="#0f121a")
+        tune_box.pack(fill=tk.X, pady=(10, 0))
+
+        tk.Label(tune_box, text="Angle Tune (угол доворота сенсора):", font=("Segoe UI", 9, "bold"), fg="#e1e6f2", bg="#0f121a").pack(anchor="w")
+        tk.Label(tune_box, text="Компенсирует наклонный хват мыши в руке (-30° до +30°):", font=("Segoe UI", 8), fg="#6d768a", bg="#0f121a").pack(anchor="w", pady=(1, 4))
+
+        t_row = tk.Frame(tune_box, bg="#0f121a")
+        t_row.pack(fill=tk.X)
+
+        self.angle_scale = ttk.Scale(t_row, from_=-30, to=30, value=self.cfg.get("angle_tune", 0), orient=tk.HORIZONTAL)
+        self.angle_scale.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 8))
+
+        self.angle_lbl = tk.Label(t_row, text=f"{self.cfg.get('angle_tune', 0)}°", font=("Segoe UI", 9, "bold"), fg="#00f09a", bg="#0f121a", width=4)
+        self.angle_lbl.pack(side=tk.LEFT)
+
+        reset_angle_btn = tk.Button(
+            t_row, text="0° Сброс", font=("Segoe UI", 8),
+            fg="#b5bdcf", bg="#191c26", activebackground="#2a3042", relief="flat", padx=6, pady=2, cursor="hand2",
+            command=self.reset_angle_tune
+        )
+        reset_angle_btn.pack(side=tk.RIGHT)
+
+        self.angle_scale.bind("<Motion>", lambda e: self.angle_lbl.config(text=f"{int(round(self.angle_scale.get()))}°"))
+        self.angle_scale.bind("<ButtonRelease-1>", self.on_angle_tune_release)
+
+    # Handlers for Tab 1
+    def on_rate_changed(self):
+        hz = self.rate_var.get()
+        self.cfg["polling_rate"] = hz
+        self.auto_apply(f"Частота {hz} Гц", set_mouse_polling_rate, hz)
+
+    def on_xy_split_toggled(self):
+        split = self.xy_split_var.get()
+        self.cfg["xy_split"] = split
+        self.save_and_sync_dpi_stages(f"X-Y Split: {'ВКЛ' if split else 'ВЫКЛ'}")
+        self.switch_tab("performance")
+
+    def select_dpi_stage(self, stage_idx: int):
+        self.cfg["active_dpi_stage"] = stage_idx
+        stages = self.cfg.get("dpi_stages", [])
+        if stage_idx < len(stages):
+            self.cfg["current_dpi"] = stages[stage_idx]["x"]
+        self.save_and_sync_dpi_stages(f"Этап {stage_idx + 1} ({self.cfg.get('current_dpi')} DPI)")
+        self.switch_tab("performance")
+
+    def on_x_slider_motion(self, e):
+        val = int(round(self.dpi_x_scale.get() / 50.0) * 50)
+        self.dpi_x_lbl.config(text=str(val))
+        if not self.xy_split_var.get():
+            self.dpi_y_scale.set(val)
+            self.dpi_y_lbl.config(text=str(val))
+
+    def on_y_slider_motion(self, e):
+        val = int(round(self.dpi_y_scale.get() / 50.0) * 50)
+        self.dpi_y_lbl.config(text=str(val))
+
+    def on_dpi_slider_release(self, e):
+        x_val = int(round(self.dpi_x_scale.get() / 50.0) * 50)
+        y_val = int(round(self.dpi_y_scale.get() / 50.0) * 50) if self.xy_split_var.get() else x_val
+        act_idx = self.cfg.get("active_dpi_stage", 0)
+        stages = self.cfg.get("dpi_stages", [])
+        if act_idx < len(stages):
+            stages[act_idx]["x"] = x_val
+            stages[act_idx]["y"] = y_val
+        self.cfg["current_dpi"] = x_val
+        self.save_and_sync_dpi_stages(f"DPI: {x_val}")
+
+    def apply_quick_preset_dpi(self, dpi_val: int):
+        act_idx = self.cfg.get("active_dpi_stage", 0)
+        stages = self.cfg.get("dpi_stages", [])
+        if act_idx < len(stages):
+            stages[act_idx]["x"] = dpi_val
+            stages[act_idx]["y"] = dpi_val
+        self.cfg["current_dpi"] = dpi_val
+        self.save_and_sync_dpi_stages(f"DPI: {dpi_val}")
+        self.switch_tab("performance")
+
+    def pick_stage_color(self, stage_idx: int):
+        stages = self.cfg.get("dpi_stages", [])
+        if stage_idx >= len(stages): return
+        cur_c = stages[stage_idx].get("color", [0, 240, 154])
+        initial_hex = rgb_to_hex(*cur_c)
+        chosen = colorchooser.askcolor(initial_hex, title=f"Цвет подсветки этапа {stage_idx + 1}")
+        if chosen and chosen[0]:
+            rgb = [int(chosen[0][0]), int(chosen[0][1]), int(chosen[0][2])]
+            stages[stage_idx]["color"] = rgb
+            self.save_and_sync_dpi_stages(f"Цвет этапа {stage_idx + 1}")
+            self.switch_tab("performance")
+
+    def save_and_sync_dpi_stages(self, desc: str):
+        stages = self.cfg.get("dpi_stages", [])
+        act_idx = self.cfg.get("active_dpi_stage", 0)
+        split = self.cfg.get("xy_split", False)
+        self.auto_apply(desc, set_mouse_full_dpi, stages, act_idx, split)
+
+    def on_lod_changed(self):
+        lod = self.lod_var.get()
+        self.cfg["mouse_lod"] = lod
+        self.auto_apply(f"LOD {lod} мм", set_mouse_lod, lod)
+
+    def on_sleep_changed(self):
+        sec = self.sleep_var.get()
+        self.cfg["mouse_sleep_time"] = sec
+        lbl = f"{sec} с" if sec < 60 else f"{sec // 60} мин"
+        self.auto_apply(f"Время сна: {lbl}", set_mouse_sleep_time, sec)
+
+    def on_ripple_changed(self):
+        val = self.ripple_var.get()
+        self.cfg["ripple_control"] = val
+        self.auto_apply(f"Ripple Control: {'ВКЛ' if val else 'ВЫКЛ'}", set_mouse_ripple_control, val)
+
+    def on_snap_changed(self):
+        val = self.snap_var.get()
+        self.cfg["angle_snap"] = val
+        self.auto_apply(f"Angle Snap: {'ВКЛ' if val else 'ВЫКЛ'}", set_mouse_angle_snap, val)
+
+    def reset_angle_tune(self):
+        self.angle_scale.set(0)
+        self.angle_lbl.config(text="0°")
+        self.cfg["angle_tune"] = 0
+        self.auto_apply("Angle Tune: 0°", set_mouse_angle_tune, 0)
+
+    def on_angle_tune_release(self, e):
+        angle = int(round(self.angle_scale.get()))
+        self.angle_lbl.config(text=f"{angle}°")
+        self.cfg["angle_tune"] = angle
+        self.auto_apply(f"Angle Tune: {angle}°", set_mouse_angle_tune, angle)
+
+    # =========================================================================
+    # TAB 2: КАСТОМИЗАЦИЯ & СЕНСОР (CUSTOMIZE)
+    # =========================================================================
+    def render_customize_tab(self):
+        panes = tk.Frame(self.container, bg="#07080c")
+        panes.pack(fill=tk.BOTH, expand=True)
+
+        left_col = tk.Frame(panes, bg="#07080c")
+        left_col.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 8))
+
+        right_col = tk.Frame(panes, bg="#07080c")
+        right_col.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(8, 0))
+
+        # --- КАРТОЧКА 1: КИБЕРСПОРТИВНЫЕ РЕЖИМЫ ---
+        c_modes = tk.Frame(left_col, bg="#0f121a", padx=16, pady=14, highlightbackground="#1a202e", highlightthickness=1)
+        c_modes.pack(fill=tk.X, pady=(0, 10))
+
+        tk.Label(c_modes, text="Режимы производительности сенсора", font=("Segoe UI", 11, "bold"), fg="#ffffff", bg="#0f121a").pack(anchor="w")
+        tk.Label(c_modes, text="Аппаратные режимы контроллера Nordic и сенсора PixArt 3950:", font=("Segoe UI", 8), fg="#6d768a", bg="#0f121a").pack(anchor="w", pady=(1, 8))
+
+        # High-Speed / Competition Mode
+        self.hyp_var = tk.BooleanVar(value=self.cfg.get("hyper_mode", False))
+        tk.Checkbutton(
+            c_modes,
+            text="👑 High-Speed / Competition Mode (максимальный отклик радиоканала)",
+            variable=self.hyp_var,
+            font=("Segoe UI", 9, "bold"), fg="#00f09a", bg="#0f121a", selectcolor="#07080c",
+            activebackground="#0f121a", activeforeground="#00f09a", highlightthickness=0, cursor="hand2",
+            command=self.on_hyper_toggled
+        ).pack(anchor="w", pady=4)
+
+        # 20K FPS Mode
+        self.tr_var = tk.BooleanVar(value=self.cfg.get("tracking_20k", False))
+        tk.Checkbutton(
+            c_modes,
+            text="⚡ 20K FPS Mode (высокочастотное считывание матрицы сенсора)",
+            variable=self.tr_var,
+            font=("Segoe UI", 9, "bold"), fg="#c084fc", bg="#0f121a", selectcolor="#07080c",
+            activebackground="#0f121a", activeforeground="#c084fc", highlightthickness=0, cursor="hand2",
+            command=self.on_20k_toggled
+        ).pack(anchor="w", pady=4)
+
+        # Motion Sync
+        self.ms_var = tk.BooleanVar(value=self.cfg.get("motion_sync", True))
+        tk.Checkbutton(
+            c_modes,
+            text="🔄 Motion Sync (аппаратная синхронизация пакетов с USB SOF)",
+            variable=self.ms_var,
+            font=("Segoe UI", 9, "bold"), fg="#38bdf8", bg="#0f121a", selectcolor="#07080c",
+            activebackground="#0f121a", activeforeground="#38bdf8", highlightthickness=0, cursor="hand2",
+            command=self.on_motion_sync_toggled
+        ).pack(anchor="w", pady=4)
+
+        # --- КАРТОЧКА 2: DEBOUNCE TIME ---
+        c_deb = tk.Frame(left_col, bg="#0f121a", padx=16, pady=14, highlightbackground="#1a202e", highlightthickness=1)
+        c_deb.pack(fill=tk.BOTH, expand=True)
+
+        tk.Label(c_deb, text="Задержка защиты от дабл-клика (Debounce Time)", font=("Segoe UI", 11, "bold"), fg="#ffffff", bg="#0f121a").pack(anchor="w")
+        tk.Label(c_deb, text="Минимальное время устранения дребезга контактов микропереключателей:", font=("Segoe UI", 8), fg="#6d768a", bg="#0f121a").pack(anchor="w", pady=(1, 8))
+
+        deb_cur = self.cfg.get("debounce_time", 0)
+        self.deb_lbl = tk.Label(c_deb, text=f"{deb_cur} мс", font=("Segoe UI", 18, "bold"), fg="#00f09a" if deb_cur == 0 else "#ffffff", bg="#0f121a")
+        self.deb_lbl.pack(pady=4)
+
+        # Stepper buttons
+        deb_row = tk.Frame(c_deb, bg="#0f121a")
+        deb_row.pack(fill=tk.X, pady=(4, 8))
+
+        deb_presets = [0, 1, 2, 4, 8, 12, 16, 20]
+        for d_val in deb_presets:
+            btn = tk.Button(
+                deb_row, text=f"{d_val}мс", font=("Segoe UI", 8, "bold"),
+                fg="#ffffff" if d_val == deb_cur else "#838ea6",
+                bg="#1a2030" if d_val == deb_cur else "#131620",
+                activebackground="#2a3044", relief="flat", padx=5, pady=4, cursor="hand2",
+                command=lambda v=d_val: self.apply_debounce(v)
+            )
+            btn.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
+
+        # --- КАРТОЧКА 3: ЦВЕТ СВЕТОДИОДА МЫШИ (LED RGB) ---
+        c_led = tk.Frame(right_col, bg="#0f121a", padx=16, pady=14, highlightbackground="#1a202e", highlightthickness=1)
+        c_led.pack(fill=tk.X, pady=(0, 10))
+
+        tk.Label(c_led, text="Цвет индикатора мыши (LED RGB)", font=("Segoe UI", 11, "bold"), fg="#ffffff", bg="#0f121a").pack(anchor="w")
+        tk.Label(c_led, text="Цвет светодиодного индикатора на корпусе мыши:", font=("Segoe UI", 8), fg="#6d768a", bg="#0f121a").pack(anchor="w", pady=(1, 8))
+
+        cur_c = tuple(self.cfg.get("led_color", [0, 240, 154]))
+        hex_cur = rgb_to_hex(*cur_c)
+
+        led_preview_row = tk.Frame(c_led, bg="#0f121a")
+        led_preview_row.pack(fill=tk.X, pady=(2, 8))
+
+        self.led_swatch = tk.Label(led_preview_row, text="       ", bg=hex_cur, relief="flat", padx=10, pady=4)
+        self.led_swatch.pack(side=tk.LEFT, padx=(0, 10))
+
+        custom_btn = tk.Button(
+            led_preview_row, text="🎨 Выбрать свой оттенок...", font=("Segoe UI", 9, "bold"),
+            fg="#ffffff", bg="#1f2638", activebackground="#2c364e", relief="flat", padx=12, pady=4, cursor="hand2",
+            command=self.on_pick_custom_led
+        )
+        custom_btn.pack(side=tk.LEFT)
+
+        # Готовые пресеты цветов
+        led_row = tk.Frame(c_led, bg="#0f121a")
+        led_row.pack(fill=tk.X)
+
+        presets = [
+            ("Изумруд", 0, 240, 154),
+            ("Циан", 0, 180, 255),
+            ("Фиолет", 168, 85, 247),
+            ("Красный", 255, 51, 102),
+            ("Янтарь", 255, 184, 46),
+            ("Белый", 255, 255, 255)
+        ]
+        for name, r, g, b in presets:
+            b_hex = rgb_to_hex(r, g, b)
+            btn = tk.Button(
+                led_row, text=name, font=("Segoe UI", 8),
+                fg="#000000" if (r+g+b)>450 else "#ffffff",
+                bg=b_hex, activebackground=b_hex, relief="flat", padx=6, pady=2, cursor="hand2",
+                command=lambda vr=r, vg=g, vb=b: self.apply_led_preset(vr, vg, vb)
+            )
+            btn.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
+
+        # --- КАРТОЧКА 4: НАЗНАЧЕНИЕ КНОПОК И СБРОС ---
+        c_btns = tk.Frame(right_col, bg="#0f121a", padx=16, pady=14, highlightbackground="#1a202e", highlightthickness=1)
+        c_btns.pack(fill=tk.BOTH, expand=True)
+
+        tk.Label(c_btns, text="Кнопки мыши & Заводской сброс", font=("Segoe UI", 11, "bold"), fg="#ffffff", bg="#0f121a").pack(anchor="w")
+        tk.Label(c_btns, text="Текущая раскладка физических кнопок LAMZU Maya X:", font=("Segoe UI", 8), fg="#6d768a", bg="#0f121a").pack(anchor="w", pady=(1, 8))
+
+        btn_grid = tk.Frame(c_btns, bg="#0f121a")
+        btn_grid.pack(fill=tk.X, pady=(0, 10))
+
+        labels = [
+            ("Кнопка 1 (Left):", "Левый клик (Left Click)"),
+            ("Кнопка 2 (Right):", "Правый клик (Right Click)"),
+            ("Кнопка 3 (Middle):", "Колёсико мыши (Wheel Click)"),
+            ("Кнопка 4 (Forward):", "Вперёд (Browser Forward)"),
+            ("Кнопка 5 (Back):", "Назад (Browser Back)"),
+            ("Кнопка 6 (Bottom):", "3-этапный переключатель герцовки")
+        ]
+        for k_lbl, v_lbl in labels:
+            row = tk.Frame(btn_grid, bg="#0f121a")
+            row.pack(fill=tk.X, pady=1)
+            tk.Label(row, text=k_lbl, font=("Segoe UI", 8, "bold"), fg="#717a8e", bg="#0f121a", width=16, anchor="w").pack(side=tk.LEFT)
+            tk.Label(row, text=v_lbl, font=("Segoe UI", 8), fg="#b5bdcf", bg="#0f121a").pack(side=tk.LEFT)
+
+        # Кнопка Factory Reset
+        reset_frame = tk.Frame(c_btns, bg="#0f121a")
+        reset_frame.pack(fill=tk.X, pady=(8, 0))
+
+        factory_btn = tk.Button(
+            reset_frame,
+            text="🔄 Заводской сброс мыши (Factory Reset)",
+            font=("Segoe UI", 9, "bold"),
+            fg="#ff4d6d",
+            bg="#211218",
+            activebackground="#331922",
+            activeforeground="#ff4d6d",
+            relief="flat",
+            cursor="hand2",
+            padx=12,
+            pady=6,
+            command=self.on_factory_reset_click
+        )
+        factory_btn.pack(fill=tk.X)
+
+    # Handlers for Tab 2
+    def on_hyper_toggled(self):
+        val = self.hyp_var.get()
+        self.cfg["hyper_mode"] = val
+        self.auto_apply(f"High-Speed Mode: {'ВКЛ' if val else 'ВЫКЛ'}", set_mouse_hyper_mode, val)
+
+    def on_20k_toggled(self):
+        val = self.tr_var.get()
+        self.cfg["tracking_20k"] = val
+        self.fps_badge.config(
+            text=" 20K FPS: ВКЛ " if val else " 20K FPS: ВЫКЛ ",
+            fg="#c084fc" if val else "#5a6275",
+            bg="#1d152b" if val else "#12141c"
+        )
+        self.auto_apply(f"20K FPS Mode: {'ВКЛ' if val else 'ВЫКЛ'}", set_mouse_tracking_mode, val)
+
+    def on_motion_sync_toggled(self):
+        val = self.ms_var.get()
+        self.cfg["motion_sync"] = val
+        self.auto_apply(f"Motion Sync: {'ВКЛ' if val else 'ВЫКЛ'}", set_mouse_motion_sync, val)
+
+    def apply_debounce(self, ms: int):
+        self.cfg["debounce_time"] = ms
+        self.deb_lbl.config(text=f"{ms} мс", fg="#00f09a" if ms == 0 else "#ffffff")
+        self.auto_apply(f"Debounce: {ms} мс", set_mouse_debounce, ms)
+        self.switch_tab("customize")
+
+    def on_pick_custom_led(self):
+        cur_c = tuple(self.cfg.get("led_color", [0, 240, 154]))
+        initial_hex = rgb_to_hex(*cur_c)
+        chosen = colorchooser.askcolor(initial_hex, title="Выберите цвет подсветки мыши")
+        if chosen and chosen[0]:
+            r, g, b = int(chosen[0][0]), int(chosen[0][1]), int(chosen[0][2])
+            self.apply_led_preset(r, g, b)
+
+    def apply_led_preset(self, r: int, g: int, b: int):
+        self.cfg["led_color"] = [r, g, b]
+        hex_c = rgb_to_hex(r, g, b)
+        self.led_swatch.config(bg=hex_c)
+        self.auto_apply("Цвет светодиода", set_mouse_led_color, r, g, b)
+
+    def on_factory_reset_click(self):
+        if messagebox.askyesno("Заводской сброс", "Сбросить все аппаратные параметры мыши LAMZU до заводских настроек?"):
+            self.auto_apply("Заводской сброс", factory_reset_mouse)
+            self.root.after(500, self.reload_all_tabs)
+
+    # =========================================================================
+    # TAB 3: ТЕСТЕР ГЕРЦОВКИ & ИНСТРУМЕНТЫ (TOOLS & TESTER)
+    # =========================================================================
+    def render_tools_tab(self):
+        panes = tk.Frame(self.container, bg="#07080c")
+        panes.pack(fill=tk.BOTH, expand=True)
+
+        left_col = tk.Frame(panes, bg="#07080c")
+        left_col.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 8))
+
+        right_col = tk.Frame(panes, bg="#07080c")
+        right_col.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(8, 0))
+
+        # --- КАРТОЧКА 1: POLLING RATE TESTER (LIVE HZ BENCHMARK) ---
+        c_test = tk.Frame(left_col, bg="#0f121a", padx=16, pady=14, highlightbackground="#1a202e", highlightthickness=1)
+        c_test.pack(fill=tk.BOTH, expand=True)
+
+        tk.Label(c_test, text="⚡ Тестер частоты опроса (Live Polling Rate Tester)", font=("Segoe UI", 11, "bold"), fg="#ffffff", bg="#0f121a").pack(anchor="w")
+        tk.Label(c_test, text="Двигайте курсор мыши внутри поля ниже, чтобы измерить реальную герцовку в реальном времени:", font=("Segoe UI", 8), fg="#6d768a", bg="#0f121a").pack(anchor="w", pady=(1, 8))
+
+        # Цифровые показатели
+        stats_row = tk.Frame(c_test, bg="#0f121a")
+        stats_row.pack(fill=tk.X, pady=(0, 8))
+
+        # Текущая
+        f_cur = tk.Frame(stats_row, bg="#141824", padx=10, pady=6)
+        f_cur.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
+        tk.Label(f_cur, text="ТЕКУЩАЯ:", font=("Segoe UI", 7, "bold"), fg="#6e788e", bg="#141824").pack()
+        self.lbl_live_hz = tk.Label(f_cur, text="0 Гц", font=("Segoe UI", 16, "bold"), fg="#00f09a", bg="#141824")
+        self.lbl_live_hz.pack()
+
+        # Пиковая
+        f_peak = tk.Frame(stats_row, bg="#141824", padx=10, pady=6)
+        f_peak.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
+        tk.Label(f_peak, text="ПИКОВАЯ:", font=("Segoe UI", 7, "bold"), fg="#6e788e", bg="#141824").pack()
+        self.lbl_peak_hz = tk.Label(f_peak, text="0 Гц", font=("Segoe UI", 16, "bold"), fg="#00b4ff", bg="#141824")
+        self.lbl_peak_hz.pack()
+
+        # Средняя
+        f_avg = tk.Frame(stats_row, bg="#141824", padx=10, pady=6)
+        f_avg.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=2)
+        tk.Label(f_avg, text="СРЕДНЯЯ:", font=("Segoe UI", 7, "bold"), fg="#6e788e", bg="#141824").pack()
+        self.lbl_avg_hz = tk.Label(f_avg, text="0 Гц", font=("Segoe UI", 16, "bold"), fg="#c084fc", bg="#141824")
+        self.lbl_avg_hz.pack()
+
+        # Интерактивный холст
+        self.test_canvas = tk.Canvas(c_test, bg="#08090f", highlightbackground="#22283a", highlightthickness=1, height=180)
+        self.test_canvas.pack(fill=tk.BOTH, expand=True, pady=(0, 8))
+
+        self.test_canvas.create_text(
+            220, 90,
+            text="🎯 ДВИГАЙТЕ МЫШЬ ЗДЕСЬ ДЛЯ ТЕСТА ГЕРЦОВКИ",
+            fill="#3e475c",
+            font=("Segoe UI", 10, "bold"),
+            tags="hint"
+        )
+
+        self.test_canvas.bind("<Motion>", self.on_tester_mouse_move)
+
+        reset_test_btn = tk.Button(
+            c_test, text="Сбросить показатели тестера", font=("Segoe UI", 8),
+            fg="#9aa4b8", bg="#161924", activebackground="#222838", relief="flat", padx=10, pady=3, cursor="hand2",
+            command=self.reset_tester
+        )
+        reset_test_btn.pack(anchor="e")
+
+        # --- КАРТОЧКА 2: БАТАРЕЯ & ЗДОРОВЬЕ ---
+        c_bat = tk.Frame(right_col, bg="#0f121a", padx=16, pady=14, highlightbackground="#1a202e", highlightthickness=1)
+        c_bat.pack(fill=tk.X, pady=(0, 10))
+
+        tk.Label(c_bat, text="🔋 Монитор батареи и автономность", font=("Segoe UI", 11, "bold"), fg="#ffffff", bg="#0f121a").pack(anchor="w")
+        tk.Label(c_bat, text="Расчет примерного времени работы аккумулятора при текущем уровне заряда:", font=("Segoe UI", 8), fg="#6d768a", bg="#0f121a").pack(anchor="w", pady=(1, 8))
+
+        bat_grid = tk.Frame(c_bat, bg="#0f121a")
+        bat_grid.pack(fill=tk.X)
+
+        estimates = [
+            ("В режиме 1000 Гц:", "~ 50-70 часов игры"),
+            ("В режиме 2000 Гц:", "~ 28-35 часов игры"),
+            ("В режиме 4000 Гц:", "~ 16-20 часов игры"),
+            ("В режиме 8000 Гц:", "~ 8-10 часов игры")
+        ]
+        for mode_title, est_val in estimates:
+            row = tk.Frame(bat_grid, bg="#0f121a")
+            row.pack(fill=tk.X, pady=1)
+            tk.Label(row, text=mode_title, font=("Segoe UI", 8, "bold"), fg="#788298", bg="#0f121a", width=18, anchor="w").pack(side=tk.LEFT)
+            tk.Label(row, text=est_val, font=("Segoe UI", 8), fg="#00f09a", bg="#0f121a").pack(side=tk.LEFT)
+
+        # --- КАРТОЧКА 3: GAME OPTIMIZER & УВЕДОМЛЕНИЯ ---
+        c_opt = tk.Frame(right_col, bg="#0f121a", padx=16, pady=14, highlightbackground="#1a202e", highlightthickness=1)
+        c_opt.pack(fill=tk.BOTH, expand=True)
+
+        tk.Label(c_opt, text="Оптимизация производительности в играх", font=("Segoe UI", 11, "bold"), fg="#ffffff", bg="#0f121a").pack(anchor="w")
+        tk.Label(c_opt, text="Исключает любые задержки ввода во время игровых сессий:", font=("Segoe UI", 8), fg="#6d768a", bg="#0f121a").pack(anchor="w", pady=(1, 8))
+
+        self.pause_game_var = tk.BooleanVar(value=self.cfg.get("pause_in_game", True))
+        tk.Checkbutton(
+            c_opt,
+            text="Отключать опрос в играх (0% задержек и нагрузки, авто-опрос при Alt-Tab)",
+            variable=self.pause_game_var,
+            font=("Segoe UI", 9), fg="#d8dde8", bg="#0f121a", selectcolor="#07080c",
+            activebackground="#0f121a", activeforeground="#00f09a", highlightthickness=0, cursor="hand2",
+            command=self.on_pause_game_toggled
+        ).pack(anchor="w", pady=2)
+
+        self.notif_var = tk.BooleanVar(value=self.cfg.get("notify_on_switch", True))
+        tk.Checkbutton(
+            c_opt,
+            text="Всплывающие уведомления Windows при смене режима кнопкой",
+            variable=self.notif_var,
+            font=("Segoe UI", 9), fg="#d8dde8", bg="#0f121a", selectcolor="#07080c",
+            activebackground="#0f121a", activeforeground="#00f09a", highlightthickness=0, cursor="hand2",
+            command=self.on_notif_toggled
+        ).pack(anchor="w", pady=2)
+
+    def on_tester_mouse_move(self, event):
+        now = time.perf_counter()
+        if self.last_mouse_time is not None:
+            dt = now - self.last_mouse_time
+            if 0.00005 < dt < 0.1:
+                hz = int(round(1.0 / dt))
+                self.hz_history.append(hz)
+                if len(self.hz_history) > 40:
+                    self.hz_history.pop(0)
+
+                self.live_hz = hz
+                if hz > self.peak_hz and hz < 12000:
+                    self.peak_hz = hz
+
+                self.avg_hz = int(sum(self.hz_history) / len(self.hz_history))
+
+                self.lbl_live_hz.config(text=f"{self.live_hz} Гц")
+                self.lbl_peak_hz.config(text=f"{self.peak_hz} Гц")
+                self.lbl_avg_hz.config(text=f"{self.avg_hz} Гц")
+
+                # Анимация следа
+                self.test_canvas.create_oval(
+                    event.x - 3, event.y - 3, event.x + 3, event.y + 3,
+                    fill="#00f09a", outline=""
+                )
+                if len(self.test_canvas.find_all()) > 60:
+                    items = self.test_canvas.find_all()
+                    if len(items) > 1:
+                        self.test_canvas.delete(items[1])
+
+        self.last_mouse_time = now
+
+    def reset_tester(self):
+        self.hz_history.clear()
+        self.peak_hz = 0
+        self.avg_hz = 0
+        self.live_hz = 0
+        self.lbl_live_hz.config(text="0 Гц")
+        self.lbl_peak_hz.config(text="0 Гц")
+        self.lbl_avg_hz.config(text="0 Гц")
+        self.test_canvas.delete("all")
+        self.test_canvas.create_text(
+            220, 90,
+            text="🎯 ДВИГАЙТЕ МЫШЬ ЗДЕСЬ ДЛЯ ТЕСТА ГЕРЦОВКИ",
+            fill="#3e475c",
+            font=("Segoe UI", 10, "bold")
+        )
+
+    def on_pause_game_toggled(self):
+        v = self.pause_game_var.get()
+        self.cfg["pause_in_game"] = v
+        self.auto_apply("Пауза опроса в играх", lambda x: None, v)
+
+    def on_notif_toggled(self):
+        v = self.notif_var.get()
+        self.cfg["notify_on_switch"] = v
+        self.auto_apply("Уведомления Windows", lambda x: None, v)
+
+    # =========================================================================
+    # TAB 4: РАЗРАБОТЧИК & ДОНАТЫ (SUPPORT)
+    # =========================================================================
+    def render_support_tab(self):
+        wrap = tk.Frame(self.container, bg="#07080c")
+        wrap.pack(fill=tk.BOTH, expand=True)
+
+        card_box = tk.Frame(wrap, bg="#0f121a", padx=24, pady=20, highlightbackground="#1e2436", highlightthickness=1)
+        card_box.pack(fill=tk.X, pady=(10, 10))
+
+        tk.Label(card_box, text="💖 Поддержка автора проекта", font=("Segoe UI", 14, "bold"), fg="#ff3b69", bg="#0f121a").pack(anchor="w")
+        tk.Label(
+            card_box,
+            text="Если приложение LAMZU Battery Monitor помогло вам, вы можете отблагодарить автора любой суммой:",
+            font=("Segoe UI", 9), fg="#8c97ad", bg="#0f121a"
+        ).pack(anchor="w", pady=(4, 14))
+
+        # Виртуальная банковская карта Obsidian Black
+        card_frame = tk.Frame(card_box, bg="#11141e", padx=20, pady=16, highlightbackground="#22283a", highlightthickness=1)
+        card_frame.pack(fill=tk.X, pady=(0, 14))
+
+        card_head = tk.Frame(card_frame, bg="#11141e")
+        card_head.pack(fill=tk.X)
+
+        tk.Label(card_head, text="ЯНДЕКС БАНК (СБП)", font=("Segoe UI", 9, "bold"), fg="#00f09a", bg="#11141e").pack(side=tk.LEFT)
+        tk.Label(card_head, text="● Перевод без комиссии", font=("Segoe UI", 8), fg="#636c82", bg="#11141e").pack(side=tk.RIGHT)
+
+        card_num_lbl = tk.Label(
+            card_frame,
+            text=format_card_number(CARD_NUMBER),
+            font=("Consolas", 18, "bold"),
+            fg="#ffffff",
+            bg="#11141e",
+            pady=10
+        )
+        card_num_lbl.pack(anchor="w")
+
+        tk.Label(card_frame, text=f"Получатель: {CARD_HOLDER}", font=("Segoe UI", 9, "bold"), fg="#8b95ac", bg="#11141e").pack(anchor="w")
+
+        btn_row = tk.Frame(card_box, bg="#0f121a")
+        btn_row.pack(fill=tk.X)
+
+        def copy_card():
+            clean = "".join(c for c in CARD_NUMBER if c.isdigit())
+            self.root.clipboard_clear()
+            self.root.clipboard_append(clean)
+            c_btn.config(text="✔ Номер скопирован!", bg="#00c880")
+            self.root.after(2500, lambda: c_btn.config(text="Скопировать номер карты", bg="#ff3366"))
+
+        c_btn = tk.Button(
+            btn_row, text="Скопировать номер карты", font=("Segoe UI", 10, "bold"),
+            fg="#ffffff", bg="#ff3366", activebackground="#d62252", relief="flat", cursor="hand2", padx=16, pady=8,
+            command=copy_card
+        )
+        c_btn.pack(side=tk.LEFT, padx=(0, 10))
+
+        gh_btn = tk.Button(
+            btn_row, text="⭐ Открыть репозиторий на GitHub", font=("Segoe UI", 10),
+            fg="#b5bccf", bg="#1a1e2b", activebackground="#262d40", relief="flat", cursor="hand2", padx=16, pady=8,
+            command=lambda: webbrowser.open(GITHUB_URL)
+        )
+        gh_btn.pack(side=tk.LEFT)
+
+    # =========================================================================
+    # FOOTER
+    # =========================================================================
+    def create_footer(self):
+        footer = tk.Frame(self.root, bg="#07080c", padx=20, pady=8)
+        footer.pack(fill=tk.X, side=tk.BOTTOM)
+
+        left = tk.Frame(footer, bg="#07080c")
+        left.pack(side=tk.LEFT)
+
+        tk.Label(left, text="● 8K Dongle Active", font=("Segoe UI", 8, "bold"), fg="#00f09a", bg="#07080c").pack(side=tk.LEFT, padx=(0, 10))
+
+        self.toast_lbl = tk.Label(
+            left,
+            text="Все изменения применяются мгновенно на лету",
+            font=("Segoe UI", 9),
+            fg="#4e5870",
+            bg="#07080c"
+        )
+        self.toast_lbl.pack(side=tk.LEFT)
+
+        close_btn = tk.Button(
+            footer,
+            text="Закрыть",
+            font=("Segoe UI", 9, "bold"),
+            fg="#08090d",
+            bg="#00f09a",
+            activebackground="#00c880",
+            relief="flat",
+            cursor="hand2",
+            padx=18,
+            pady=4,
+            command=self.root.destroy
+        )
+        close_btn.pack(side=tk.RIGHT)
+
+def show_settings_dialog(on_change_callback: Optional[Callable[[str, Any], None]] = None):
+    root = tk.Tk()
+    app = LamzuControlSuiteGUI(root, on_change_callback)
     root.mainloop()
 
 if __name__ == "__main__":

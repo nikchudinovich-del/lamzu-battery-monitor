@@ -514,6 +514,17 @@ class LamzuTrayApp:
             self.update_tray_icon()
         threading.Thread(target=worker, daemon=True).start()
 
+    def set_quick_rate(self, rate_hz: int):
+        """Быстрое переключение частоты опроса (Polling Rate) из меню трея."""
+        def worker():
+            self.cfg["polling_rate"] = rate_hz
+            save_config(self.cfg)
+            set_mouse_polling_rate(rate_hz)
+            if self.cfg.get("notify_on_switch", True):
+                self.notify(f"⚡ Частота опроса: {rate_hz} Гц", "LAMZU Maya X")
+            self.update_tray_icon()
+        threading.Thread(target=worker, daemon=True).start()
+
     def set_quick_led(self, r: int, g: int, b: int):
         """Быстрое переключение цвета светодиода мыши из меню трея."""
         def worker():
@@ -525,13 +536,12 @@ class LamzuTrayApp:
         threading.Thread(target=worker, daemon=True).start()
 
     def open_settings(self, icon, item):
-        def on_saved(new_cfg):
-            self.cfg = new_cfg
-            self.apply_stage(self.current_stage, show_notification=False)
+        def on_changed(param_name, val):
+            self.cfg = load_config()
             self.update_tray_icon()
 
         from settings_gui import show_settings_dialog
-        threading.Thread(target=lambda: show_settings_dialog(on_saved, self.apply_stage), daemon=True).start()
+        threading.Thread(target=lambda: show_settings_dialog(on_changed), daemon=True).start()
 
     def on_refresh_click(self, icon, item):
         threading.Thread(target=self.poll_battery, daemon=True).start()
@@ -575,6 +585,17 @@ class LamzuTrayApp:
                 )
             return pystray.Menu(*items)
 
+        def make_rate_menu():
+            rates = [500, 1000, 2000, 4000, 8000]
+            items = []
+            for r in rates:
+                def make_handler(val):
+                    return lambda icon, it: self.set_quick_rate(val)
+                def make_checker(val):
+                    return lambda it: self.cfg.get("polling_rate", 1000) == val
+                items.append(item(f"{r} Гц", make_handler(r), checked=make_checker(r)))
+            return pystray.Menu(*items)
+
         def make_led_menu():
             led_options = [
                 ("🟢 Изумрудный неон", 0, 240, 154),
@@ -614,10 +635,11 @@ class LamzuTrayApp:
             pystray.Menu.SEPARATOR,
             item(lambda text: next_stage_text(), self.cycle_mode_manual),
             item("🎯 Быстрый выбор DPI", make_dpi_menu()),
+            item("⚡ Частота опроса (Гц)", make_rate_menu()),
             item("💡 Цвет светодиода", make_led_menu()),
-            item("⚙ Настройки мыши (DPI, LOD, Сон, LED)...", self.open_settings),
+            item("🛠 Панель управления LAMZU Studio...", self.open_settings),
             pystray.Menu.SEPARATOR,
-            item("🔄 Обновить сейчас", self.on_refresh_click),
+            item("🔄 Обновить заряд сейчас", self.on_refresh_click),
             item(
                 "✔ Автозагрузка с Windows",
                 self.toggle_autostart,

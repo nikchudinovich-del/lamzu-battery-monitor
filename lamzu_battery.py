@@ -798,3 +798,413 @@ def get_lamzu_status() -> Dict[str, Any]:
         "product": "LAMZU Maya X",
         "error": "sleep"
     }
+
+
+def get_mouse_debounce(path: Optional[bytes] = None) -> Optional[int]:
+    """Возвращает текущий Debounce Time в мс (0..20)."""
+    p = path or get_control_device_path()
+    if not p: return None
+    r = send_aurora_cmd(p, 0, 136, 1, 0)
+    if r and len(r) > 8 and r[6] == 136:
+        return r[8]
+    return None
+
+def set_mouse_debounce(ms: int, path: Optional[bytes] = None) -> bool:
+    """Устанавливает Debounce Time в мс (0..20)."""
+    p = path or get_control_device_path()
+    if not p: return False
+    ms = max(0, min(20, int(ms)))
+    h = hid.device()
+    try:
+        h.open_path(p)
+        h.set_nonblocking(True)
+    except Exception:
+        new_p = get_control_device_path(force_refresh=True)
+        if not new_p: return False
+        try:
+            h.open_path(new_p)
+            h.set_nonblocking(True)
+        except Exception:
+            return False
+    try:
+        for prof in (1, 0):
+            cmd = bytearray(65)
+            cmd[3]=2; cmd[4]=2; cmd[5]=0; cmd[6]=8; cmd[7]=prof; cmd[8]=ms
+            h.send_feature_report(cmd)
+            time.sleep(0.015)
+        return True
+    except Exception:
+        return False
+    finally:
+        try: h.close()
+        except Exception: pass
+
+def get_mouse_motion_sync(path: Optional[bytes] = None) -> Optional[bool]:
+    """Возвращает статус Motion Sync (True/False)."""
+    p = path or get_control_device_path()
+    if not p: return None
+    r = send_aurora_cmd(p, 1, 137, 1, 0)
+    if r and len(r) > 8 and r[6] == 137:
+        return (r[8] == 1)
+    return None
+
+def set_mouse_motion_sync(enabled: bool, path: Optional[bytes] = None) -> bool:
+    """Включает или выключает Motion Sync."""
+    p = path or get_control_device_path()
+    if not p: return False
+    val = 1 if enabled else 0
+    h = hid.device()
+    try:
+        h.open_path(p)
+        h.set_nonblocking(True)
+    except Exception:
+        new_p = get_control_device_path(force_refresh=True)
+        if not new_p: return False
+        try:
+            h.open_path(new_p)
+            h.set_nonblocking(True)
+        except Exception:
+            return False
+    try:
+        for prof in (1, 0):
+            cmd = bytearray(65)
+            cmd[3]=2; cmd[4]=2; cmd[5]=1; cmd[6]=9; cmd[7]=prof; cmd[8]=val
+            h.send_feature_report(cmd)
+            time.sleep(0.015)
+        return True
+    except Exception:
+        return False
+    finally:
+        try: h.close()
+        except Exception: pass
+
+def get_mouse_ripple_control(path: Optional[bytes] = None) -> Optional[bool]:
+    """Возвращает статус Ripple Control."""
+    p = path or get_control_device_path()
+    if not p: return None
+    r = send_aurora_cmd(p, 1, 138, 1, 0)
+    if r and len(r) > 8 and r[6] == 138:
+        return (r[8] == 1)
+    return None
+
+def set_mouse_ripple_control(enabled: bool, path: Optional[bytes] = None) -> bool:
+    """Включает или выключает Ripple Control."""
+    p = path or get_control_device_path()
+    if not p: return False
+    val = 1 if enabled else 0
+    h = hid.device()
+    try:
+        h.open_path(p)
+        h.set_nonblocking(True)
+    except Exception:
+        new_p = get_control_device_path(force_refresh=True)
+        if not new_p: return False
+        try:
+            h.open_path(new_p)
+            h.set_nonblocking(True)
+        except Exception:
+            return False
+    try:
+        for prof in (1, 0):
+            cmd = bytearray(65)
+            cmd[3]=2; cmd[4]=2; cmd[5]=1; cmd[6]=10; cmd[7]=prof; cmd[8]=val
+            h.send_feature_report(cmd)
+            time.sleep(0.015)
+        return True
+    except Exception:
+        return False
+    finally:
+        try: h.close()
+        except Exception: pass
+
+def get_mouse_angle_snap(path: Optional[bytes] = None) -> Optional[bool]:
+    """Возвращает статус Angle Snap."""
+    p = path or get_control_device_path()
+    if not p: return None
+    r = send_aurora_cmd(p, 1, 132, 1, 0)
+    if r and len(r) > 8 and r[6] == 132:
+        return (r[8] == 1)
+    return None
+
+def set_mouse_angle_snap(enabled: bool, path: Optional[bytes] = None) -> bool:
+    """Включает или выключает Angle Snap."""
+    p = path or get_control_device_path()
+    if not p: return False
+    val = 1 if enabled else 0
+    h = hid.device()
+    try:
+        h.open_path(p)
+        h.set_nonblocking(True)
+    except Exception:
+        new_p = get_control_device_path(force_refresh=True)
+        if not new_p: return False
+        try:
+            h.open_path(new_p)
+            h.set_nonblocking(True)
+        except Exception:
+            return False
+    try:
+        for prof in (1, 0):
+            cmd = bytearray(65)
+            cmd[3]=2; cmd[4]=2; cmd[5]=1; cmd[6]=4; cmd[7]=prof; cmd[8]=val
+            h.send_feature_report(cmd)
+            time.sleep(0.015)
+        return True
+    except Exception:
+        return False
+    finally:
+        try: h.close()
+        except Exception: pass
+
+def get_mouse_angle_tune(path: Optional[bytes] = None) -> Optional[int]:
+    """Возвращает угол доворота сенсора (-30..+30 градусов)."""
+    p = path or get_control_device_path()
+    if not p: return None
+    r = send_aurora_cmd(p, 1, 148, 1, 0)
+    if r and len(r) > 8 and r[6] == 148:
+        val = r[8]
+        if val > 128:
+            return val - 256
+        return val
+    return None
+
+def set_mouse_angle_tune(angle: int, path: Optional[bytes] = None) -> bool:
+    """Устанавливает угол доворота сенсора (-30..+30 градусов)."""
+    p = path or get_control_device_path()
+    if not p: return False
+    angle = max(-30, min(30, int(angle)))
+    b_val = (angle + 256) % 256
+    h = hid.device()
+    try:
+        h.open_path(p)
+        h.set_nonblocking(True)
+    except Exception:
+        new_p = get_control_device_path(force_refresh=True)
+        if not new_p: return False
+        try:
+            h.open_path(new_p)
+            h.set_nonblocking(True)
+        except Exception:
+            return False
+    try:
+        for prof in (1, 0):
+            cmd = bytearray(65)
+            cmd[3]=2; cmd[4]=2; cmd[5]=1; cmd[6]=20; cmd[7]=prof; cmd[8]=b_val
+            h.send_feature_report(cmd)
+            time.sleep(0.015)
+        return True
+    except Exception:
+        return False
+    finally:
+        try: h.close()
+        except Exception: pass
+
+def get_mouse_profile(path: Optional[bytes] = None) -> Optional[int]:
+    """Возвращает активный профиль (0..3)."""
+    p = path or get_control_device_path()
+    if not p: return None
+    r = send_aurora_cmd(p, 0, 133, 1, 0)
+    if r and len(r) > 8 and r[6] == 133:
+        return r[8]
+    return None
+
+def set_mouse_profile(prof_id: int, path: Optional[bytes] = None) -> bool:
+    """Переключает профиль (0 = Profile 1 .. 3 = Profile 4)."""
+    p = path or get_control_device_path()
+    if not p: return False
+    prof_id = max(0, min(3, int(prof_id)))
+    h = hid.device()
+    try:
+        h.open_path(p)
+        h.set_nonblocking(True)
+    except Exception:
+        new_p = get_control_device_path(force_refresh=True)
+        if not new_p: return False
+        try:
+            h.open_path(new_p)
+            h.set_nonblocking(True)
+        except Exception:
+            return False
+    try:
+        cmd = bytearray(65)
+        cmd[3]=2; cmd[4]=1; cmd[5]=0; cmd[6]=5; cmd[7]=prof_id
+        h.send_feature_report(cmd)
+        time.sleep(0.02)
+        return True
+    except Exception:
+        return False
+    finally:
+        try: h.close()
+        except Exception: pass
+
+def get_mouse_dpi_detailed(path: Optional[bytes] = None) -> Optional[Dict[str, Any]]:
+    """Считывает подробную информацию по всем этапам DPI, активному этапу, цветам и X/Y split."""
+    p = path or get_control_device_path()
+    if not p: return None
+    h = hid.device()
+    try:
+        h.open_path(p)
+        h.set_nonblocking(True)
+    except Exception:
+        return None
+    try:
+        # 1. getActiveDPI
+        cmd_act = bytearray(65); cmd_act[3]=2; cmd_act[4]=2; cmd_act[5]=1; cmd_act[6]=130; cmd_act[7]=1
+        h.send_feature_report(cmd_act)
+        time.sleep(0.02)
+        active_idx = 0
+        for _ in range(15):
+            r = h.get_feature_report(0, 65)
+            if r and len(r) > 8 and r[6] == 130:
+                active_idx = r[8]
+                break
+            time.sleep(0.01)
+
+        # 2. getDPIXYOnOff
+        cmd_xy = bytearray(65); cmd_xy[3]=2; cmd_xy[4]=2; cmd_xy[5]=1; cmd_xy[6]=141; cmd_xy[7]=1
+        h.send_feature_report(cmd_xy)
+        time.sleep(0.02)
+        xy_split = False
+        for _ in range(15):
+            r = h.get_feature_report(0, 65)
+            if r and len(r) > 8 and r[6] == 141:
+                xy_split = (r[8] == 1)
+                break
+            time.sleep(0.01)
+
+        # 3. getDPIStageInfo
+        cmd_st = bytearray(65); cmd_st[3]=2; cmd_st[4]=10; cmd_st[5]=1; cmd_st[6]=129; cmd_st[7]=1; cmd_st[8]=6
+        h.send_feature_report(cmd_st)
+        time.sleep(0.02)
+        stages = []
+        for _ in range(25):
+            r = h.get_feature_report(0, 65)
+            if r and len(r) > 8 and r[6] == 129:
+                cnt = r[8]
+                for i in range(cnt):
+                    x = (r[9 + i*4] << 8) | r[10 + i*4]
+                    y = (r[11 + i*4] << 8) | r[12 + i*4]
+                    stages.append({"x": x, "y": y})
+                break
+            time.sleep(0.01)
+
+        # 4. getDPIStageColors
+        cmd_col = bytearray(65); cmd_col[3]=2; cmd_col[4]=19; cmd_col[5]=2; cmd_col[6]=129; cmd_col[7]=1
+        h.send_feature_report(cmd_col)
+        time.sleep(0.02)
+        colors = []
+        for _ in range(25):
+            r = h.get_feature_report(0, 65)
+            if r and len(r) > 22 and r[6] == 129:
+                for i in range(len(stages) or 5):
+                    idx = 8 + i*3
+                    colors.append([r[idx], r[idx+1], r[idx+2]])
+                break
+            time.sleep(0.01)
+
+        for i, s in enumerate(stages):
+            s["color"] = colors[i] if i < len(colors) else [0, 240, 154]
+
+        return {
+            "active_index": active_idx,
+            "xy_split": xy_split,
+            "stages": stages,
+            "count": len(stages)
+        }
+    except Exception:
+        return None
+    finally:
+        try: h.close()
+        except Exception: pass
+
+def set_mouse_full_dpi(stages: list, active_idx: int, xy_split: bool = False, path: Optional[bytes] = None) -> bool:
+    """Записывает полную конфигурацию этапов DPI, активный этап, цвета и режим X/Y Split."""
+    p = path or get_control_device_path()
+    if not p or not stages: return False
+    h = hid.device()
+    try:
+        h.open_path(p)
+        h.set_nonblocking(True)
+    except Exception:
+        new_p = get_control_device_path(force_refresh=True)
+        if not new_p: return False
+        try:
+            h.open_path(new_p)
+            h.set_nonblocking(True)
+            p = new_p
+        except Exception:
+            return False
+    try:
+        # 1. XY Split on/off
+        split_val = 1 if xy_split else 0
+        for prof in (1, 0):
+            cmd_xy = bytearray(65)
+            cmd_xy[3]=2; cmd_xy[4]=2; cmd_xy[5]=1; cmd_xy[6]=13; cmd_xy[7]=prof; cmd_xy[8]=split_val
+            h.send_feature_report(cmd_xy)
+            time.sleep(0.015)
+
+        # 2. Stage values buffer
+        buf = bytearray()
+        colors_flat = []
+        for s in stages:
+            x = max(50, min(30000, int(s.get("x", 800))))
+            y = max(50, min(30000, int(s.get("y", x)))) if xy_split else x
+            buf.extend([(x >> 8) & 0xff, x & 0xff, (y >> 8) & 0xff, y & 0xff])
+            c = s.get("color", [0, 240, 154])
+            colors_flat.extend([int(c[0]), int(c[1]), int(c[2])])
+
+        # 3. Write stages
+        for prof in (1, 0):
+            cmd = bytearray(65)
+            cmd[3]=2; cmd[4]=2 + len(buf); cmd[5]=1; cmd[6]=1; cmd[7]=prof; cmd[8]=len(stages)
+            cmd[9:9+len(buf)] = buf
+            h.send_feature_report(cmd)
+            time.sleep(0.015)
+
+        # 4. Activate chosen stage
+        target_stage = max(0, min(len(stages)-1, int(active_idx)))
+        for prof in (1, 0):
+            cmd = bytearray(65)
+            cmd[3]=2; cmd[4]=2; cmd[5]=1; cmd[6]=2; cmd[7]=prof; cmd[8]=target_stage
+            h.send_feature_report(cmd)
+            time.sleep(0.015)
+
+        # 5. Write stage colors if provided
+        if colors_flat:
+            while len(colors_flat) < 15:
+                colors_flat.extend([0, 240, 154])
+            for prof in (1, 0):
+                cmd_c = bytearray(65)
+                cmd_c[3]=2; cmd_c[4]=19; cmd_c[5]=2; cmd_c[6]=1; cmd_c[7]=prof
+                cmd_c[8:8+15] = bytearray(colors_flat[:15])
+                h.send_feature_report(cmd_c)
+                time.sleep(0.015)
+
+        return True
+    except Exception:
+        return False
+    finally:
+        try: h.close()
+        except Exception: pass
+
+def factory_reset_mouse(path: Optional[bytes] = None) -> bool:
+    """Выполняет аппаратный сброс мыши до заводских настроек (Factory Reset)."""
+    p = path or get_control_device_path()
+    if not p: return False
+    h = hid.device()
+    try:
+        h.open_path(p)
+        h.set_nonblocking(True)
+    except Exception:
+        return False
+    try:
+        cmd = bytearray(65)
+        cmd[3]=2; cmd[4]=2; cmd[5]=0; cmd[6]=0; cmd[7]=192; cmd[8]=1
+        h.send_feature_report(cmd)
+        time.sleep(0.05)
+        return True
+    except Exception:
+        return False
+    finally:
+        try: h.close()
+        except Exception: pass
