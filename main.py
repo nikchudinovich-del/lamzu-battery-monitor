@@ -10,6 +10,11 @@
 
 import os
 import sys
+
+_script_dir = os.path.dirname(os.path.abspath(__file__))
+if _script_dir not in sys.path:
+    sys.path.insert(0, _script_dir)
+
 import time
 import winreg
 import ctypes
@@ -467,9 +472,14 @@ class LamzuTrayApp:
         icon.stop()
 
     def open_donation(self, icon, item):
-        import webbrowser
-        url = self.cfg.get("donation_url", "https://www.donationalerts.com/")
-        webbrowser.open(url)
+        from settings_gui import show_donation_dialog
+        import tkinter as tk
+        def run_dlg():
+            root = tk.Tk()
+            root.withdraw()
+            show_donation_dialog(root, self.cfg)
+            root.destroy()
+        threading.Thread(target=run_dlg, daemon=True).start()
 
     def open_github(self, icon, item):
         import webbrowser

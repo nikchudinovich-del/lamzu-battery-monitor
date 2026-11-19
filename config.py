@@ -25,6 +25,8 @@ DEFAULT_CONFIG = {
 
     "auto_sync_button": True,
     "notify_on_switch": True,
+    "card_number": "",           # Номер карты для донатов
+    "card_holder": "",           # Банк / Получатель (СБП)
     "donation_url": "https://www.donationalerts.com/",
     "github_url": "https://github.com/",
 }

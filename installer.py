@@ -121,7 +121,15 @@ pause
 ''')
 
     log("Запуск приложения в трее...", 95)
-    subprocess.Popen([dest_exe], cwd=install_dir)
+    try:
+        os.startfile(dest_exe)
+    except Exception:
+        subprocess.Popen(
+            [dest_exe],
+            cwd=install_dir,
+            creationflags=0x00000008 | 0x00000200,
+            close_fds=True
+        )
 
     log("Готово!", 100)
     return True
@@ -164,10 +172,11 @@ class InstallerGUI:
         card.pack(fill=tk.X, padx=24, pady=10)
 
         features = [
-            "✔  Опрос заряда мыши каждую 1 минуту",
-            "✔  Отображение процента и молнии зарядки в трее",
-            "✔  Автозапуск при старте Windows",
-            "✔  Ярлык на Рабочем столе и в меню «Пуск»",
+            "✔  Точный процент заряда и цветовая индикация в трее",
+            "✔  3-этапное переключение кнопки снизу (1000 / 2000 / 4000 Гц)",
+            "✔  Защита от бага 0% при переходе мыши в спящий режим",
+            "✔  0% нагрузки в играх (пауза опроса и мгновенный Alt-Tab)",
+            "✔  Автозапуск при старте Windows и ярлык на Рабочем столе",
         ]
 
         for feat in features:

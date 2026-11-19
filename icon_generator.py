@@ -1,10 +1,26 @@
 """
-Генератор динамических иконок для системного трея Windows.
-Отображает процент заряда мыши и индикатор зарядки.
+Генератор высококачественных динамических иконок для системного трея Windows.
+Использует суперсемплинг 4x (256x256) и фильтр Lanczos для кристальной четкости
+шрифтов и сглаженных углов на любых мониторах и разрешениях Windows.
 """
 
+import os
 from PIL import Image, ImageDraw, ImageFont
 from typing import Optional
+
+def _get_font(font_size: int):
+    candidates = [
+        r"C:\Windows\Fonts\bahnschrift.ttf",
+        r"C:\Windows\Fonts\segoeuib.ttf",
+        r"C:\Windows\Fonts\arialbd.ttf"
+    ]
+    for p in candidates:
+        if os.path.exists(p):
+            try:
+                return ImageFont.truetype(p, font_size)
+            except Exception:
+                pass
+    return ImageFont.load_default()
 
 def generate_battery_icon(
     percent: Optional[int],
@@ -12,97 +28,85 @@ def generate_battery_icon(
     is_online: bool = True
 ) -> Image.Image:
     """
-    Генерирует иконку 64x64 с процентом заряда.
+    Генерирует иконку 64x64 с процентом заряда в стильном глубоком черном дизайне.
     """
-    size = (64, 64)
-    img = Image.new("RGBA", size, (0, 0, 0, 0))
+    S = 256  # 4x суперсемплинг
+    img = Image.new("RGBA", (S, S), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
 
     if percent is None:
         # Устройство еще не ответило ни разу
-        border_color = (120, 120, 130, 200)
-        bg_color = (30, 30, 35, 230)
-        text_color = (160, 160, 170, 220)
-        display_text = "--"
+        txt = "--"
+        accent = (95, 105, 125, 255)         # Графитовый
+        bg = (11, 13, 18, 250)
+        num_color = (175, 185, 205, 240)
     else:
-        # Отображаем реальный процент заряда (даже если мышь в режиме сна!)
         val = max(1, min(100, percent))
-        display_text = f"{val}"
+        txt = f"{val}"
 
         if is_charging:
-            border_color = (0, 190, 255, 255)      # Неоново-голубой
-            bg_color = (15, 28, 45, 240)
-            text_color = (255, 255, 255, 255)
+            accent = (0, 230, 255, 255)       # Неоновый кибер-голубой
+            bg = (6, 17, 26, 250)             # Глубокий темный циан
+            num_color = (255, 255, 255, 255)
         elif val <= 15:
-            border_color = (245, 60, 60, 255)      # Красный
-            bg_color = (45, 18, 18, 240)
-            text_color = (255, 255, 255, 255)
+            accent = (255, 52, 85, 255)       # Неоновый красный
+            bg = (24, 7, 11, 250)             # Глубокий темный кармин
+            num_color = (255, 255, 255, 255)
         elif val <= 30:
-            border_color = (245, 170, 40, 255)     # Оранжевый
-            bg_color = (40, 30, 15, 240)
-            text_color = (255, 255, 255, 255)
+            accent = (255, 175, 25, 255)      # Неоновый оранжевый/золото
+            bg = (24, 15, 6, 250)             # Темный янтарный
+            num_color = (255, 255, 255, 255)
         else:
-            border_color = (40, 210, 95, 255)      # Зеленый
-            bg_color = (18, 38, 25, 240)
-            text_color = (255, 255, 255, 255)
+            accent = (0, 242, 148, 255)       # Неоновый изумрудно-зеленый
+            bg = (6, 18, 12, 250)             # Глубокий обсидиановый черновато-зеленый
+            num_color = (255, 255, 255, 255)
 
-        # Если мышь уснула, слегка смягчаем фон, но процент четко виден
         if not is_online:
-            bg_color = (25, 30, 35, 230)
-            text_color = (220, 225, 230, 240)
+            # Мышь уснула: сохраняем точный процент, но делаем контур мягче
+            accent = (70, 95, 85, 255) if val > 30 else (120, 90, 70, 255)
+            bg = (10, 13, 16, 240)
+            num_color = (210, 220, 230, 230)
 
-    # Отрисовка скругленного фона
-    draw.rounded_rectangle(
-        [2, 2, 61, 61],
-        radius=14,
-        fill=bg_color,
-        outline=border_color,
-        width=3
-    )
+    # 1. Мягкое внешнее неоновое свечение (Outer Glow)
+    glow_col = (accent[0], accent[1], accent[2], 55)
+    draw.rounded_rectangle([3, 3, S - 4, S - 4], radius=68, outline=glow_col, width=10)
 
-    # Подбор шрифта
-    font = None
-    font_candidates = ["segoeuib.ttf", "arialbd.ttf", "tahoma.ttf", "arial.ttf"]
-    
-    # Размер шрифта: для "100" нужен чуть меньший кегль
-    target_font_size = 31 if len(display_text) <= 2 else 25
-    
-    for font_name in font_candidates:
-        try:
-            font = ImageFont.truetype(font_name, target_font_size)
-            break
-        except Exception:
-            continue
+    # 2. Основная глубокая черная карточка с ярким контуром
+    draw.rounded_rectangle([10, 10, S - 11, S - 11], radius=60, fill=bg, outline=accent, width=15)
 
-    if font is None:
-        font = ImageFont.load_default()
+    # 3. Тонкий внутренний блик для эффекта премиального стекла
+    inner_highlight = (255, 255, 255, 24)
+    draw.rounded_rectangle([26, 26, S - 27, S - 27], radius=44, outline=inner_highlight, width=4)
 
-    # Центрирование текста
-    bbox = draw.textbbox((0, 0), display_text, font=font)
+    # 4. Типографика (Bahnschrift / Segoe UI Bold)
+    font_size = 142 if len(txt) <= 2 else 106
+    font = _get_font(font_size)
+
+    bbox = draw.textbbox((0, 0), txt, font=font)
     tw = bbox[2] - bbox[0]
     th = bbox[3] - bbox[1]
 
-    # Смещение по вертикали с учетом индикатора зарядки
-    y_offset = 0 if not is_charging else 2
-    x = (64 - tw) / 2
-    y = (60 - th) / 2 - 2 + y_offset
+    tx = (S - tw) / 2 - bbox[0]
+    ty = (S - th) / 2 - bbox[1] - 3
 
-    draw.text((x, y), display_text, font=font, fill=text_color)
-
-    # Иконка молнии при зарядке (в верхнем правом углу)
+    # Если мышь заряжается, выводим стильную молнию в правом верхнем углу
     if is_charging and is_online:
-        # Молния
+        tx -= 12
         bolt = [
-            (46, 5),
-            (56, 5),
-            (49, 16),
-            (57, 16),
-            (41, 30),
-            (44, 18),
-            (37, 18)
+            (S - 66, 20),
+            (S - 26, 20),
+            (S - 52, 68),
+            (S - 24, 68),
+            (S - 74, 134),
+            (S - 60, 80),
+            (S - 84, 80),
         ]
-        draw.polygon(bolt, fill=(0, 230, 255, 255))
-        # Маленькая обводка молнии для контраста
-        draw.line(bolt + [bolt[0]], fill=(0, 100, 180, 200), width=1)
+        draw.polygon(bolt, fill=(0, 240, 255, 255))
+        draw.line(bolt + [bolt[0]], fill=(0, 120, 200, 220), width=3)
 
-    return img
+    # Отрисовка цифр
+    draw.text((tx, ty), txt, font=font, fill=num_color)
+
+    # Высококачественное сжатие Lanczos до финального размера трея 64x64
+    final_icon = img.resize((64, 64), Image.Resampling.LANCZOS)
+    return final_icon
