@@ -26,9 +26,8 @@ DEFAULT_CONFIG = {
     "auto_sync_button": True,
     "notify_on_switch": True,
     "card_number": "2204 3110 1790 0938",  # Номер карты для донатов
-    "card_holder": "СБП (Любой банк РФ)",  # Банк / Получатель (СБП)
-    "donation_url": "https://www.donationalerts.com/",
-    "github_url": "https://github.com/",
+    "card_holder": "Яндекс Банк (СБП)",     # Банк / Получатель (СБП)
+    "github_url": "https://github.com/nikchudinovich-del",
 }
 
 def get_config_path() -> str:

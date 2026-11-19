@@ -1,7 +1,7 @@
 """
 Модуль графического интерфейса настроек LAMZU Battery & Polling Rate Monitor.
 Глубокая черная тема (AMOLED Dark), нативная тёмная панель Windows 11/10,
-стильные карточки настроек, поддержка номера карты для пожертвований и копирование в буфер.
+стильные карточки настроек, поддержка номера карты Яндекс Банка и копирование в буфер.
 """
 
 import os
@@ -14,8 +14,7 @@ from typing import Optional, Callable
 
 from config import load_config, save_config
 
-DEFAULT_DONATION_URL = "https://www.donationalerts.com/"
-DEFAULT_GITHUB_URL = "https://github.com/"
+DEFAULT_GITHUB_URL = "https://github.com/nikchudinovich-del"
 
 def enable_dark_title_bar(window):
     """Включает нативную тёмную тему для заголовка окна Windows 10/11."""
@@ -49,17 +48,28 @@ def get_icon_path():
 def format_card_number(raw_num: str) -> str:
     """Форматирует номер карты блоками по 4 цифры."""
     clean = "".join(c for c in raw_num if c.isdigit())
+    if not clean:
+        clean = "2204311017900938"
     return " ".join(clean[i:i+4] for i in range(0, len(clean), 4))
 
-def show_donation_dialog(parent, cfg: dict, on_save_callback: Optional[Callable[[dict], None]] = None):
+def show_donation_dialog(parent=None, cfg: dict = None, on_save_callback: Optional[Callable[[dict], None]] = None):
     """Окно поддержки / пожертвований с номером банковской карты и кнопкой копирования."""
-    dlg = tk.Toplevel(parent)
+    if cfg is None:
+        cfg = load_config()
+
+    is_standalone = False
+    if parent is None:
+        dlg = tk.Tk()
+        is_standalone = True
+    else:
+        dlg = tk.Toplevel(parent)
+        dlg.transient(parent)
+        dlg.grab_set()
+
     dlg.title("Поддержать автора проекта")
-    dlg.geometry("500x420")
+    dlg.geometry("480x360")
     dlg.resizable(False, False)
     dlg.configure(bg="#08090d")
-    dlg.transient(parent)
-    dlg.grab_set()
 
     enable_dark_title_bar(dlg)
     ico = get_icon_path()
@@ -70,9 +80,13 @@ def show_donation_dialog(parent, cfg: dict, on_save_callback: Optional[Callable[
             pass
 
     dlg.update_idletasks()
-    x = parent.winfo_x() + (parent.winfo_width() // 2) - 250
-    y = parent.winfo_y() + (parent.winfo_height() // 2) - 210
-    dlg.geometry(f"500x420+{x}+{y}")
+    if parent is not None:
+        x = parent.winfo_x() + (parent.winfo_width() // 2) - 240
+        y = parent.winfo_y() + (parent.winfo_height() // 2) - 180
+    else:
+        x = (dlg.winfo_screenwidth() // 2) - 240
+        y = (dlg.winfo_screenheight() // 2) - 180
+    dlg.geometry(f"480x360+{x}+{y}")
 
     # Заголовок
     header = tk.Frame(dlg, bg="#08090d", padx=24, pady=16)
@@ -88,7 +102,7 @@ def show_donation_dialog(parent, cfg: dict, on_save_callback: Optional[Callable[
 
     tk.Label(
         header,
-        text="Если приложение полезно для вас, вы можете отблагодарить автора\nлюбой суммой по номеру карты (СБП) или через сервис донатов:",
+        text="Если приложение полезно для вас, вы можете поддержать автора\nлюбой суммой по номеру карты через СБП:",
         font=("Segoe UI", 9),
         fg="#858da3",
         bg="#08090d",
@@ -104,7 +118,7 @@ def show_donation_dialog(parent, cfg: dict, on_save_callback: Optional[Callable[
 
     tk.Label(
         card_head,
-        text="БАНКОВСКАЯ КАРТА / СБП",
+        text="ЯНДЕКС БАНК (СБП)",
         font=("Segoe UI", 8, "bold"),
         fg="#00e6a0",
         bg="#11141d"
@@ -118,46 +132,42 @@ def show_donation_dialog(parent, cfg: dict, on_save_callback: Optional[Callable[
         bg="#11141d"
     ).pack(side=tk.RIGHT)
 
-    raw_card = cfg.get("card_number", "").strip()
-    display_card = format_card_number(raw_card) if raw_card else "Номер карты не указан"
+    raw_card = cfg.get("card_number", "2204 3110 1790 0938").strip() or "2204 3110 1790 0938"
+    display_card = format_card_number(raw_card)
 
     card_num_lbl = tk.Label(
         card_frame,
         text=display_card,
-        font=("Consolas", 15, "bold"),
-        fg="#ffffff" if raw_card else "#5c6478",
+        font=("Consolas", 16, "bold"),
+        fg="#ffffff",
         bg="#11141d",
         pady=8
     )
     card_num_lbl.pack(anchor="w")
 
-    card_holder = cfg.get("card_holder", "").strip()
-    holder_text = f"Получатель / Банк: {card_holder}" if card_holder else "Любой банк РФ через СБП"
+    holder_text = "Банк: Яндекс Банк (СБП)"
     tk.Label(
         card_frame,
         text=holder_text,
-        font=("Segoe UI", 9),
+        font=("Segoe UI", 9, "bold"),
         fg="#8e97ad",
         bg="#11141d"
     ).pack(anchor="w")
 
-    # Кнопка копирования номера карты
+    # Статус копирования
     copy_status_lbl = tk.Label(dlg, text="", font=("Segoe UI", 9, "bold"), fg="#00f09a", bg="#08090d")
     copy_status_lbl.pack(pady=(0, 4))
 
     def on_copy_card():
-        clean_num = "".join(c for c in raw_card if c.isdigit())
-        if clean_num:
-            dlg.clipboard_clear()
-            dlg.clipboard_append(clean_num)
-            copy_status_lbl.config(text="✔ Номер карты успешно скопирован в буфер обмена!")
-            copy_btn.config(text="Скопировано!", bg="#00c880")
-            dlg.after(2500, lambda: (
-                copy_status_lbl.config(text=""),
-                copy_btn.config(text="Скопировать номер карты", bg="#ff3366")
-            ))
-        else:
-            copy_status_lbl.config(text="Укажите номер карты в настройках приложения!", fg="#ff5555")
+        clean_num = "".join(c for c in raw_card if c.isdigit()) or "2204311017900938"
+        dlg.clipboard_clear()
+        dlg.clipboard_append(clean_num)
+        copy_status_lbl.config(text="✔ Номер карты Яндекс Банка скопирован в буфер обмена!")
+        copy_btn.config(text="✔ Скопировано!", bg="#00c880")
+        dlg.after(2500, lambda: (
+            copy_status_lbl.config(text=""),
+            copy_btn.config(text="Скопировать номер карты", bg="#ff3366")
+        ))
 
     actions_frame = tk.Frame(dlg, bg="#08090d", padx=24)
     actions_frame.pack(fill=tk.X)
@@ -165,45 +175,22 @@ def show_donation_dialog(parent, cfg: dict, on_save_callback: Optional[Callable[
     copy_btn = tk.Button(
         actions_frame,
         text="Скопировать номер карты",
-        font=("Segoe UI", 9, "bold"),
+        font=("Segoe UI", 10, "bold"),
         fg="#ffffff",
         bg="#ff3366",
         activebackground="#e02454",
         activeforeground="#ffffff",
         relief="flat",
         cursor="hand2",
-        padx=14,
-        pady=6,
+        padx=18,
+        pady=8,
         command=on_copy_card
     )
-    copy_btn.pack(side=tk.LEFT, padx=(0, 10))
-
-    def open_donation_link():
-        u = cfg.get("donation_url", DEFAULT_DONATION_URL).strip()
-        if u:
-            if not u.startswith("http://") and not u.startswith("https://"):
-                u = "https://" + u
-            webbrowser.open(u)
-
-    donate_link_btn = tk.Button(
-        actions_frame,
-        text="DonationAlerts / Boosty",
-        font=("Segoe UI", 9),
-        fg="#c8cddc",
-        bg="#181c26",
-        activebackground="#252b3b",
-        activeforeground="#ffffff",
-        relief="flat",
-        cursor="hand2",
-        padx=12,
-        pady=6,
-        command=open_donation_link
-    )
-    donate_link_btn.pack(side=tk.LEFT)
+    copy_btn.pack(fill=tk.X)
 
     # Разделитель и кнопка закрытия
     sep = tk.Frame(dlg, bg="#181c26", height=1)
-    sep.pack(fill=tk.X, padx=24, pady=(18, 12))
+    sep.pack(fill=tk.X, padx=24, pady=(16, 12))
 
     footer = tk.Frame(dlg, bg="#08090d", padx=24)
     footer.pack(fill=tk.X)
@@ -225,17 +212,20 @@ def show_donation_dialog(parent, cfg: dict, on_save_callback: Optional[Callable[
         activebackground="#00c88c",
         relief="flat",
         cursor="hand2",
-        padx=14,
-        pady=4,
+        padx=16,
+        pady=5,
         command=dlg.destroy
     )
     close_btn.pack(side=tk.RIGHT)
+
+    if is_standalone:
+        dlg.mainloop()
 
 def show_settings_dialog(on_saved_callback: Optional[Callable[[dict], None]] = None, apply_stage_callback: Optional[Callable[[int], None]] = None):
     """Главное окно настроек в глубокой черной теме (AMOLED Dark)."""
     root = tk.Tk()
     root.title("LAMZU Maya X — Настройки и реквизиты")
-    root.geometry("560x710")
+    root.geometry("560x660")
     root.resizable(False, False)
     root.configure(bg="#08090d")
 
@@ -250,8 +240,8 @@ def show_settings_dialog(on_saved_callback: Optional[Callable[[dict], None]] = N
 
     root.update_idletasks()
     x = (root.winfo_screenwidth() // 2) - 280
-    y = (root.winfo_screenheight() // 2) - 355
-    root.geometry(f"560x710+{x}+{y}")
+    y = (root.winfo_screenheight() // 2) - 330
+    root.geometry(f"560x660+{x}+{y}")
 
     cfg = load_config()
 
@@ -511,9 +501,9 @@ def show_settings_dialog(on_saved_callback: Optional[Callable[[dict], None]] = N
 
     tk.Label(
         don_head,
-        text="Люди смогут переводить по номеру карты или ссылке",
-        font=("Segoe UI", 8),
-        fg="#6d7589",
+        text="Яндекс Банк (СБП)",
+        font=("Segoe UI", 8, "bold"),
+        fg="#00e6a0",
         bg="#0f1118"
     ).pack(side=tk.RIGHT)
 
@@ -531,7 +521,7 @@ def show_settings_dialog(on_saved_callback: Optional[Callable[[dict], None]] = N
         anchor="w"
     ).pack(side=tk.LEFT)
 
-    card_num_var = tk.StringVar(value=cfg.get("card_number", ""))
+    card_num_var = tk.StringVar(value=cfg.get("card_number", "2204 3110 1790 0938"))
     card_entry = tk.Entry(
         f_card,
         textvariable=card_num_var,
@@ -559,7 +549,7 @@ def show_settings_dialog(on_saved_callback: Optional[Callable[[dict], None]] = N
         anchor="w"
     ).pack(side=tk.LEFT)
 
-    holder_var = tk.StringVar(value=cfg.get("card_holder", ""))
+    holder_var = tk.StringVar(value=cfg.get("card_holder", "Яндекс Банк (СБП)"))
     holder_entry = tk.Entry(
         f_holder,
         textvariable=holder_var,
@@ -573,34 +563,6 @@ def show_settings_dialog(on_saved_callback: Optional[Callable[[dict], None]] = N
     )
     holder_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=3)
 
-    # 3. Поле: Ссылка на донат
-    f_url = tk.Frame(c_donate, bg="#0f1118")
-    f_url.pack(fill=tk.X, pady=(2, 2))
-
-    tk.Label(
-        f_url,
-        text="Ссылка на донат:",
-        font=("Segoe UI", 8, "bold"),
-        fg="#c8cedb",
-        bg="#0f1118",
-        width=18,
-        anchor="w"
-    ).pack(side=tk.LEFT)
-
-    url_var = tk.StringVar(value=cfg.get("donation_url", DEFAULT_DONATION_URL))
-    url_entry = tk.Entry(
-        f_url,
-        textvariable=url_var,
-        font=("Segoe UI", 9),
-        fg="#ffffff",
-        bg="#171924",
-        insertbackground="#00f09a",
-        relief="flat",
-        highlightbackground="#242838",
-        highlightthickness=1
-    )
-    url_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=3)
-
     # ==================== НИЖНЯЯ ПАНЕЛЬ ====================
     footer = tk.Frame(root, bg="#08090d")
     footer.pack(fill=tk.X, padx=22, pady=(0, 14))
@@ -610,11 +572,9 @@ def show_settings_dialog(on_saved_callback: Optional[Callable[[dict], None]] = N
     left_actions.pack(side=tk.LEFT)
 
     def on_preview_donation():
-        # Тестовый просмотр окна донатов с введенными данными
         temp_cfg = dict(cfg)
         temp_cfg["card_number"] = card_num_var.get().strip()
         temp_cfg["card_holder"] = holder_var.get().strip()
-        temp_cfg["donation_url"] = url_var.get().strip()
         show_donation_dialog(root, temp_cfg)
 
     def on_github_click():
@@ -672,7 +632,7 @@ def show_settings_dialog(on_saved_callback: Optional[Callable[[dict], None]] = N
             "notify_on_switch": notify_var.get(),
             "card_number": card_num_var.get().strip(),
             "card_holder": holder_var.get().strip(),
-            "donation_url": url_var.get().strip()
+            "github_url": DEFAULT_GITHUB_URL
         })
         save_config(new_cfg)
         if on_saved_callback:

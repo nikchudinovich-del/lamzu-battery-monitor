@@ -212,6 +212,12 @@ class LamzuTrayApp:
             if show_notif:
                 self.notify(f"⚪ [3/3] Обычный режим: {target_rate} Гц", "LAMZU Maya X")
 
+        with self.lock:
+            now_str = datetime.now().strftime("%H:%M:%S")
+            bat_val = self.last_battery if self.last_battery is not None else "--"
+            st_str = "Заряжается" if self.last_state == 1 else "Разряжается"
+            self.last_update_str = f"{self.product_name}: {bat_val}% ({st_str})\nРежим: {self.mode_str}\nОбновлено: {now_str}"
+
         self.last_hardware_state = (1 if high_speed else 0, 1 if tracking else 0)
         self.update_tray_icon()
 
@@ -246,6 +252,12 @@ class LamzuTrayApp:
             self.mode_str = f"Обычный ({target_rate} Гц)"
             if show_notification and self.cfg.get("notify_on_switch", True):
                 self.notify(f"⚪ [3/3] Обычный режим: {target_rate} Гц", "LAMZU Maya X")
+
+        with self.lock:
+            now_str = datetime.now().strftime("%H:%M:%S")
+            bat_val = self.last_battery if self.last_battery is not None else "--"
+            st_str = "Заряжается" if self.last_state == 1 else "Разряжается"
+            self.last_update_str = f"{self.product_name}: {bat_val}% ({st_str})\nРежим: {self.mode_str}\nОбновлено: {now_str}"
 
         self.last_hardware_state = (1 if stage in (1, 2) else 0, 1 if stage == 2 else 0)
         self.update_tray_icon()
@@ -411,6 +423,10 @@ class LamzuTrayApp:
 
         self.icon.icon = new_image
         self.icon.title = tooltip[:128]
+        try:
+            self.icon.menu = self.create_menu()
+        except Exception:
+            pass
 
     def battery_worker(self):
         self.poll_battery()
@@ -473,17 +489,11 @@ class LamzuTrayApp:
 
     def open_donation(self, icon, item):
         from settings_gui import show_donation_dialog
-        import tkinter as tk
-        def run_dlg():
-            root = tk.Tk()
-            root.withdraw()
-            show_donation_dialog(root, self.cfg)
-            root.destroy()
-        threading.Thread(target=run_dlg, daemon=True).start()
+        threading.Thread(target=lambda: show_donation_dialog(parent=None, cfg=self.cfg), daemon=True).start()
 
     def open_github(self, icon, item):
         import webbrowser
-        webbrowser.open(self.cfg.get("github_url", "https://github.com/"))
+        webbrowser.open(self.cfg.get("github_url", "https://github.com/nikchudinovich-del"))
 
     def create_menu(self):
         def next_stage_text():
