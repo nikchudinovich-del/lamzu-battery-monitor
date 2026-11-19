@@ -1,8 +1,8 @@
 """
 Модуль графического интерфейса настроек LAMZU Battery & Polling Rate Monitor.
 Глубокая черная тема (AMOLED Dark), нативная тёмная панель Windows 11/10,
-управление DPI, высотой отрыва (LOD), тайм-аутом сна мыши, 3-мя этапами переключения,
-а также реквизиты Яндекс Банка (СБП) для поддержки разработчика.
+управление DPI, высотой отрыва (LOD), тайм-аутом сна мыши, цветом светодиода (LED),
+а также неизменяемые реквизиты автора Яндекс Банка (СБП) для поддержки проекта.
 """
 
 import os
@@ -10,20 +10,20 @@ import sys
 import ctypes
 import webbrowser
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, colorchooser
 from typing import Optional, Callable
 
-from config import load_config, save_config
+from config import load_config, save_config, CARD_NUMBER, CARD_HOLDER, GITHUB_URL
 from lamzu_battery import (
     get_mouse_lod,
     set_mouse_lod,
     get_mouse_sleep_time,
     set_mouse_sleep_time,
     get_mouse_dpi,
-    set_mouse_dpi
+    set_mouse_dpi,
+    get_mouse_led_color,
+    set_mouse_led_color
 )
-
-DEFAULT_GITHUB_URL = "https://github.com/nikchudinovich-del"
 
 def enable_dark_title_bar(window):
     """Включает нативную тёмную тему для заголовка окна Windows 10/11."""
@@ -61,11 +61,15 @@ def format_card_number(raw_num: str) -> str:
         clean = "2204311017900938"
     return " ".join(clean[i:i+4] for i in range(0, len(clean), 4))
 
-def show_donation_dialog(parent=None, cfg: dict = None, on_save_callback: Optional[Callable[[dict], None]] = None):
-    """Окно поддержки / пожертвований с номером банковской карты и кнопкой копирования."""
-    if cfg is None:
-        cfg = load_config()
+def rgb_to_hex(r: int, g: int, b: int) -> str:
+    return f"#{r:02x}{g:02x}{b:02x}"
 
+def hex_to_rgb(hex_str: str) -> tuple:
+    hex_str = hex_str.lstrip('#')
+    return tuple(int(hex_str[i:i+2], 16) for i in (0, 2, 4))
+
+def show_donation_dialog(parent=None, cfg: dict = None, on_save_callback: Optional[Callable[[dict], None]] = None):
+    """Окно поддержки / пожертвований с фиксированным номером карты Яндекс Банка автора и кнопкой копирования."""
     is_standalone = False
     if parent is None:
         dlg = tk.Tk()
@@ -111,14 +115,14 @@ def show_donation_dialog(parent=None, cfg: dict = None, on_save_callback: Option
 
     tk.Label(
         header,
-        text="Если приложение полезно для вас, вы можете поддержать автора\nлюбой суммой по номеру карты через СБП:",
+        text="Если приложение полезно для вас, вы можете отблагодарить автора\nлюбой суммой по номеру карты через СБП:",
         font=("Segoe UI", 9),
         fg="#858da3",
         bg="#08090d",
         justify="left"
     ).pack(anchor="w", pady=(4, 0))
 
-    # Виртуальная банковская карта (Cyber Black Card)
+    # Виртуальная банковская карта (Obsidian Black Card)
     card_frame = tk.Frame(dlg, bg="#11141d", padx=18, pady=14, highlightbackground="#222738", highlightthickness=1)
     card_frame.pack(fill=tk.X, padx=24, pady=(0, 14))
 
@@ -141,7 +145,7 @@ def show_donation_dialog(parent=None, cfg: dict = None, on_save_callback: Option
         bg="#11141d"
     ).pack(side=tk.RIGHT)
 
-    raw_card = cfg.get("card_number", "2204 3110 1790 0938").strip() or "2204 3110 1790 0938"
+    raw_card = CARD_NUMBER
     display_card = format_card_number(raw_card)
 
     card_num_lbl = tk.Label(
@@ -154,7 +158,7 @@ def show_donation_dialog(parent=None, cfg: dict = None, on_save_callback: Option
     )
     card_num_lbl.pack(anchor="w")
 
-    holder_text = "Банк: Яндекс Банк (СБП)"
+    holder_text = f"Банк: {CARD_HOLDER}"
     tk.Label(
         card_frame,
         text=holder_text,
@@ -168,7 +172,7 @@ def show_donation_dialog(parent=None, cfg: dict = None, on_save_callback: Option
     copy_status_lbl.pack(pady=(0, 4))
 
     def on_copy_card():
-        clean_num = "".join(c for c in raw_card if c.isdigit()) or "2204311017900938"
+        clean_num = "".join(c for c in raw_card if c.isdigit())
         dlg.clipboard_clear()
         dlg.clipboard_append(clean_num)
         copy_status_lbl.config(text="✔ Номер карты Яндекс Банка скопирован в буфер обмена!")
@@ -231,7 +235,7 @@ def show_donation_dialog(parent=None, cfg: dict = None, on_save_callback: Option
         dlg.mainloop()
 
 def show_settings_dialog(on_saved_callback: Optional[Callable[[dict], None]] = None, apply_stage_callback: Optional[Callable[[int], None]] = None):
-    """Главное окно настроек в глубокой черной теме (AMOLED Dark) со скроллингом и поддержкой DPI, LOD, Sleep."""
+    """Главное окно настроек в глубокой черной теме (AMOLED Dark). Настройки применяются ТОЛЬКО по нажатию Сохранить."""
     root = tk.Tk()
     root.title("LAMZU Maya X — Настройки мыши и производительности")
     root.geometry("600x740")
@@ -254,14 +258,16 @@ def show_settings_dialog(on_saved_callback: Optional[Callable[[dict], None]] = N
 
     cfg = load_config()
 
-    # Считываем текущие настройки сенсора мыши (если мышь подключена)
+    # Считываем текущее состояние с мыши ТОЛЬКО для начального отображения в UI (без перезаписи на мышь!)
     live_lod = get_mouse_lod()
     live_sleep = get_mouse_sleep_time()
     live_dpi = get_mouse_dpi()
+    live_led = get_mouse_led_color()
 
     current_lod = live_lod if live_lod is not None else cfg.get("mouse_lod", 1.0)
     current_sleep = live_sleep if live_sleep is not None else cfg.get("mouse_sleep_time", 60)
     current_dpi = live_dpi if live_dpi is not None else cfg.get("current_dpi", 800)
+    current_led = live_led if live_led is not None else tuple(cfg.get("led_color", [0, 240, 154]))
 
     # --- ШАПКА ОКНА (Фиксированная) ---
     header = tk.Frame(root, bg="#08090d")
@@ -291,7 +297,7 @@ def show_settings_dialog(on_saved_callback: Optional[Callable[[dict], None]] = N
 
     tk.Label(
         header,
-        text="Управление DPI, высотой отрыва (LOD), сном и 3-мя этапами переключения кнопки",
+        text="Управление DPI, высотой отрыва (LOD), сном, подсветкой и 3-мя этапами кнопки",
         font=("Segoe UI", 9),
         fg="#72798e",
         bg="#08090d"
@@ -320,7 +326,6 @@ def show_settings_dialog(on_saved_callback: Optional[Callable[[dict], None]] = N
     canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
     scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
-    # Плавный скролл колесиком мыши
     def on_mousewheel(event):
         if canvas.winfo_exists():
             canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
@@ -406,7 +411,7 @@ def show_settings_dialog(on_saved_callback: Optional[Callable[[dict], None]] = N
         bg="#0f1118"
     ).pack(side=tk.RIGHT)
 
-    # 1. DPI
+    # DPI
     dpi_row = tk.Frame(c_sensor, bg="#0f1118")
     dpi_row.pack(fill=tk.X, pady=(2, 4))
 
@@ -427,7 +432,6 @@ def show_settings_dialog(on_saved_callback: Optional[Callable[[dict], None]] = N
             command=on_dpi_preset_selected
         ).pack(side=tk.LEFT, padx=(0, 6))
 
-    # Поле своего DPI
     custom_frame = tk.Frame(c_sensor, bg="#0f1118")
     custom_frame.pack(fill=tk.X, pady=(2, 6))
 
@@ -459,13 +463,13 @@ def show_settings_dialog(on_saved_callback: Optional[Callable[[dict], None]] = N
 
     tk.Label(
         custom_frame,
-        text="(от 50 до 30 000 DPI с шагом 50)",
+        text="(от 50 до 30 000 DPI, X и Y строго синхронны)",
         font=("Segoe UI", 8),
         fg="#6b7280",
         bg="#0f1118"
     ).pack(side=tk.LEFT)
 
-    # 2. Высота отрыва (LOD)
+    # Высота отрыва (LOD)
     lod_row = tk.Frame(c_sensor, bg="#0f1118")
     lod_row.pack(fill=tk.X, pady=(4, 2))
 
@@ -484,7 +488,109 @@ def show_settings_dialog(on_saved_callback: Optional[Callable[[dict], None]] = N
             activebackground="#0f1118", activeforeground="#a855f7", highlightthickness=0, cursor="hand2"
         ).pack(side=tk.LEFT, padx=(0, 8))
 
-    # ==================== КАРТОЧКА 3: ЭНЕРГОСБЕРЕЖЕНИЕ (ВРЕМЯ ДО СНА) ====================
+    # ==================== КАРТОЧКА 3: ПОДСВЕТКА / ЦВЕТ СВЕТОДИОДА ====================
+    c_led = tk.Frame(content, bg="#0f1118", padx=12, pady=10, highlightbackground="#1d212e", highlightthickness=1)
+    c_led.pack(fill=tk.X, pady=(0, 8))
+
+    led_head = tk.Frame(c_led, bg="#0f1118")
+    led_head.pack(fill=tk.X, pady=(0, 6))
+
+    tk.Label(
+        led_head,
+        text="Подсветка: Цвет светодиода мыши (LED RGB)",
+        font=("Segoe UI", 9, "bold"),
+        fg="#00e6a0",
+        bg="#0f1118"
+    ).pack(side=tk.LEFT)
+
+    selected_rgb = [current_led[0], current_led[1], current_led[2]]
+    current_hex = rgb_to_hex(selected_rgb[0], selected_rgb[1], selected_rgb[2])
+
+    led_row = tk.Frame(c_led, bg="#0f1118")
+    led_row.pack(fill=tk.X, pady=(2, 4))
+
+    # Квадратный индикатор выбранного цвета
+    color_preview = tk.Label(
+        led_row,
+        text="    ",
+        bg=current_hex,
+        relief="solid",
+        bd=1,
+        width=3,
+        height=1
+    )
+    color_preview.pack(side=tk.LEFT, padx=(0, 10))
+
+    color_hex_lbl = tk.Label(
+        led_row,
+        text=current_hex.upper(),
+        font=("Consolas", 9, "bold"),
+        fg="#ffffff",
+        bg="#0f1118",
+        width=8
+    )
+    color_hex_lbl.pack(side=tk.LEFT, padx=(0, 12))
+
+    def update_led_color(r, g, b):
+        selected_rgb[0] = r
+        selected_rgb[1] = g
+        selected_rgb[2] = b
+        new_hex = rgb_to_hex(r, g, b)
+        color_preview.config(bg=new_hex)
+        color_hex_lbl.config(text=new_hex.upper())
+
+    # Быстрые пресеты популярных цветов
+    presets = [
+        ("Неон", 0, 240, 154, "#00f09a"),
+        ("Циан", 0, 180, 255, "#00b4ff"),
+        ("Фиолет", 168, 85, 247, "#a855f7"),
+        ("Красный", 255, 51, 102, "#ff3366"),
+        ("Янтарь", 255, 184, 46, "#ffb82e"),
+        ("Белый", 255, 255, 255, "#ffffff")
+    ]
+
+    for name, pr, pg, pb, phex in presets:
+        btn = tk.Button(
+            led_row,
+            text=name,
+            font=("Segoe UI", 8, "bold"),
+            fg="#08090d" if phex in ("#00f09a", "#ffb82e", "#ffffff") else "#ffffff",
+            bg=phex,
+            activebackground=phex,
+            relief="flat",
+            cursor="hand2",
+            padx=6,
+            pady=2,
+            command=lambda r=pr, g=pg, b=pb: update_led_color(r, g, b)
+        )
+        btn.pack(side=tk.LEFT, padx=(0, 5))
+
+    def choose_custom_color():
+        chosen = colorchooser.askcolor(
+            color=rgb_to_hex(selected_rgb[0], selected_rgb[1], selected_rgb[2]),
+            title="Выберите цвет светодиода мыши"
+        )
+        if chosen and chosen[0]:
+            r, g, b = int(chosen[0][0]), int(chosen[0][1]), int(chosen[0][2])
+            update_led_color(r, g, b)
+
+    custom_color_btn = tk.Button(
+        led_row,
+        text="Палитра...",
+        font=("Segoe UI", 8),
+        fg="#c8cedb",
+        bg="#1c202d",
+        activebackground="#2a3044",
+        activeforeground="#ffffff",
+        relief="flat",
+        cursor="hand2",
+        padx=7,
+        pady=2,
+        command=choose_custom_color
+    )
+    custom_color_btn.pack(side=tk.LEFT, padx=(4, 0))
+
+    # ==================== КАРТОЧКА 4: ЭНЕРГОСБЕРЕЖЕНИЕ (ВРЕМЯ ДО СНА) ====================
     c_sleep = tk.Frame(content, bg="#0f1118", padx=12, pady=10, highlightbackground="#1d212e", highlightthickness=1)
     c_sleep.pack(fill=tk.X, pady=(0, 8))
 
@@ -520,9 +626,9 @@ def show_settings_dialog(on_saved_callback: Optional[Callable[[dict], None]] = N
             activebackground="#0f1118", activeforeground="#38bdf8", highlightthickness=0, cursor="hand2"
         ).pack(side=tk.LEFT, padx=(0, 8))
 
-    # ==================== КАРТОЧКА 4: ОПТИМИЗАЦИЯ В ИГРАХ ====================
+    # ==================== КАРТОЧКА 5: ОПТИМИЗАЦИЯ В ИГРАХ ====================
     c_perf = tk.Frame(content, bg="#0f1118", padx=12, pady=10, highlightbackground="#1d212e", highlightthickness=1)
-    c_perf.pack(fill=tk.X, pady=(0, 8))
+    c_perf.pack(fill=tk.X, pady=(0, 4))
 
     tk.Label(
         c_perf,
@@ -583,86 +689,6 @@ def show_settings_dialog(on_saved_callback: Optional[Callable[[dict], None]] = N
         cursor="hand2"
     ).pack(anchor="w", pady=(1, 0))
 
-    # ==================== КАРТОЧКА 5: РЕКВИЗИТЫ ДЛЯ ДОНАТОВ ====================
-    c_donate = tk.Frame(content, bg="#0f1118", padx=12, pady=10, highlightbackground="#1d212e", highlightthickness=1)
-    c_donate.pack(fill=tk.X, pady=(0, 4))
-
-    don_head = tk.Frame(c_donate, bg="#0f1118")
-    don_head.pack(fill=tk.X, pady=(0, 6))
-
-    tk.Label(
-        don_head,
-        text="Реквизиты для поддержки автора (Донаты)",
-        font=("Segoe UI", 9, "bold"),
-        fg="#ff3b69",
-        bg="#0f1118"
-    ).pack(side=tk.LEFT)
-
-    tk.Label(
-        don_head,
-        text="Яндекс Банк (СБП)",
-        font=("Segoe UI", 8, "bold"),
-        fg="#00e6a0",
-        bg="#0f1118"
-    ).pack(side=tk.RIGHT)
-
-    # 1. Поле: Номер карты
-    f_card = tk.Frame(c_donate, bg="#0f1118")
-    f_card.pack(fill=tk.X, pady=(2, 3))
-
-    tk.Label(
-        f_card,
-        text="Номер вашей карты:",
-        font=("Segoe UI", 8, "bold"),
-        fg="#c8cedb",
-        bg="#0f1118",
-        width=18,
-        anchor="w"
-    ).pack(side=tk.LEFT)
-
-    card_num_var = tk.StringVar(value=cfg.get("card_number", "2204 3110 1790 0938"))
-    card_entry = tk.Entry(
-        f_card,
-        textvariable=card_num_var,
-        font=("Consolas", 10, "bold"),
-        fg="#00f09a",
-        bg="#171924",
-        insertbackground="#00f09a",
-        relief="flat",
-        highlightbackground="#242838",
-        highlightthickness=1
-    )
-    card_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=3)
-
-    # 2. Поле: Банк / Получатель (СБП)
-    f_holder = tk.Frame(c_donate, bg="#0f1118")
-    f_holder.pack(fill=tk.X, pady=(2, 2))
-
-    tk.Label(
-        f_holder,
-        text="Банк / Получатель:",
-        font=("Segoe UI", 8, "bold"),
-        fg="#c8cedb",
-        bg="#0f1118",
-        width=18,
-        anchor="w"
-    ).pack(side=tk.LEFT)
-
-    holder_var = tk.StringVar(value=cfg.get("card_holder", "Яндекс Банк (СБП)"))
-    holder_entry = tk.Entry(
-        f_holder,
-        textvariable=holder_var,
-        font=("Segoe UI", 9),
-        fg="#ffffff",
-        bg="#171924",
-        insertbackground="#00f09a",
-        relief="flat",
-        highlightbackground="#242838",
-        highlightthickness=1
-    )
-    holder_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=3)
-
-    # Привязываем скролл ко всем элементам внутри content
     bind_tree_wheel(content)
 
     # ==================== НИЖНЯЯ ПАНЕЛЬ (Фиксированная) ====================
@@ -673,14 +699,10 @@ def show_settings_dialog(on_saved_callback: Optional[Callable[[dict], None]] = N
     left_actions.pack(side=tk.LEFT)
 
     def on_preview_donation():
-        temp_cfg = dict(cfg)
-        temp_cfg["card_number"] = card_num_var.get().strip()
-        temp_cfg["card_holder"] = holder_var.get().strip()
-        show_donation_dialog(root, temp_cfg)
+        show_donation_dialog(root, cfg)
 
     def on_github_click():
-        u = cfg.get("github_url", DEFAULT_GITHUB_URL)
-        webbrowser.open(u)
+        webbrowser.open(GITHUB_URL)
 
     donate_btn = tk.Button(
         left_actions,
@@ -727,6 +749,7 @@ def show_settings_dialog(on_saved_callback: Optional[Callable[[dict], None]] = N
 
         chosen_lod = round(float(lod_var.get()), 1)
         chosen_sleep = int(sleep_var.get())
+        chosen_led = [selected_rgb[0], selected_rgb[1], selected_rgb[2]]
 
         new_cfg = dict(cfg)
         new_cfg.update({
@@ -739,21 +762,23 @@ def show_settings_dialog(on_saved_callback: Optional[Callable[[dict], None]] = N
             "current_dpi": chosen_dpi,
             "mouse_lod": chosen_lod,
             "mouse_sleep_time": chosen_sleep,
+            "led_color": chosen_led,
             "pause_in_game": pause_game_var.get(),
             "poll_interval": poll_int_var.get(),
             "auto_sync_button": True,
             "notify_on_switch": notify_var.get(),
-            "card_number": card_num_var.get().strip(),
-            "card_holder": holder_var.get().strip(),
-            "github_url": DEFAULT_GITHUB_URL
+            "card_number": CARD_NUMBER,
+            "card_holder": CARD_HOLDER,
+            "github_url": GITHUB_URL
         })
         save_config(new_cfg)
 
-        # Применяем настройки сразу на мышь
+        # ПРИМЕНЯЕМ НАСТРОЙКИ К МЫШИ ТОЛЬКО ЗДЕСЬ, КОГДА ПОЛЬЗОВАТЕЛЬ НАЖАЛ СОХРАНИТЬ
         try:
             set_mouse_dpi(chosen_dpi)
             set_mouse_lod(chosen_lod)
             set_mouse_sleep_time(chosen_sleep)
+            set_mouse_led_color(chosen_led[0], chosen_led[1], chosen_led[2])
         except Exception:
             pass
 

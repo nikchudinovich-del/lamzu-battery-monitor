@@ -581,7 +581,7 @@ def get_mouse_dpi(path: Optional[bytes] = None) -> Optional[int]:
     return None
 
 def set_mouse_dpi(dpi: int, path: Optional[bytes] = None) -> bool:
-    """Устанавливает активный DPI мыши (400, 800, 1200, 1600, 2400, 3200 и т.д.)."""
+    """Устанавливает активный DPI мыши (симметрично и одинаково для осей X и Y)."""
     p = path or get_control_device_path()
     if not p or dpi <= 0:
         return False
@@ -604,9 +604,23 @@ def set_mouse_dpi(dpi: int, path: Optional[bytes] = None) -> bool:
             return False
 
     try:
-        # Получаем текущие этапы
+        # Гарантируем отключение раздельного DPI по осям X и Y (100% симметричное движение)
+        for prof in (1, 0):
+            cmd_xy = bytearray(65)
+            cmd_xy[3] = 2; cmd_xy[4] = 2; cmd_xy[5] = 1; cmd_xy[6] = 13; cmd_xy[7] = prof; cmd_xy[8] = 0
+            h.send_feature_report(cmd_xy)
+            time.sleep(0.015)
+
+        # Сбрасываем Angle Tune (угол доворота курсора строго в 0)
+        for prof in (1, 0):
+            cmd_angle = bytearray(65)
+            cmd_angle[3] = 2; cmd_angle[4] = 2; cmd_angle[5] = 1; cmd_angle[6] = 20; cmd_angle[7] = prof; cmd_angle[8] = 0
+            h.send_feature_report(cmd_angle)
+            time.sleep(0.015)
+
+        # Считываем текущие этапы DPI
         q_dpi = bytearray(65)
-        q_dpi[3] = 2; q_dpi[4] = 10; q_dpi[5] = 1; q_dpi[6] = 129; q_dpi[7] = 1; q_dpi[8] = 5
+        q_dpi[3] = 2; q_dpi[4] = 10; q_dpi[5] = 1; q_dpi[6] = 129; q_dpi[7] = 1; q_dpi[8] = 6
         h.send_feature_report(q_dpi)
         time.sleep(0.02)
         dpis = []
@@ -625,7 +639,7 @@ def set_mouse_dpi(dpi: int, path: Optional[bytes] = None) -> bool:
             h.send_feature_report(q_dpi)
             time.sleep(0.015)
 
-        if not dpis:
+        if not dpis or len(dpis) < 5:
             dpis = [800, 1200, 1600, 2400, 3200]
 
         target_stage = 0
@@ -634,19 +648,118 @@ def set_mouse_dpi(dpi: int, path: Optional[bytes] = None) -> bool:
         else:
             dpis[0] = dpi
             target_stage = 0
-            buf = bytearray()
-            for d in dpis:
-                buf.extend([(d >> 8) & 0xff, d & 0xff, (d >> 8) & 0xff, d & 0xff])
-            for prof in (1, 0):
-                cmd = bytearray(65)
-                cmd[3] = 2; cmd[4] = 2 + len(buf); cmd[5] = 1; cmd[6] = 1; cmd[7] = prof; cmd[8] = len(dpis)
-                cmd[9:9+len(buf)] = buf
-                h.send_feature_report(cmd)
-                time.sleep(0.015)
+
+        # Формируем буфер: X и Y строго равны!
+        buf = bytearray()
+        for d in dpis:
+            buf.extend([(d >> 8) & 0xff, d & 0xff, (d >> 8) & 0xff, d & 0xff])
 
         for prof in (1, 0):
             cmd = bytearray(65)
+            cmd[3] = 2; cmd[4] = 2 + len(buf); cmd[5] = 1; cmd[6] = 1; cmd[7] = prof; cmd[8] = len(dpis)
+            cmd[9:9+len(buf)] = buf
+            h.send_feature_report(cmd)
+            time.sleep(0.015)
+
+        # Активируем выбранный этап
+        for prof in (1, 0):
+            cmd = bytearray(65)
             cmd[3] = 2; cmd[4] = 2; cmd[5] = 1; cmd[6] = 2; cmd[7] = prof; cmd[8] = target_stage
+            h.send_feature_report(cmd)
+            time.sleep(0.015)
+
+        return True
+    except Exception:
+        return False
+    finally:
+        try:
+            h.close()
+        except Exception:
+            pass
+
+def get_mouse_led_color(path: Optional[bytes] = None) -> Optional[Tuple[int, int, int]]:
+    """Возвращает текущий RGB цвет активного светодиода мыши."""
+    p = path or get_control_device_path()
+    if not p:
+        return None
+
+    h = hid.device()
+    try:
+        h.open_path(p)
+        h.set_nonblocking(True)
+    except Exception:
+        return None
+
+    try:
+        # 1. Получаем активный этап (0..4)
+        q_act = bytearray(65); q_act[3]=2; q_act[4]=2; q_act[5]=1; q_act[6]=130; q_act[7]=1
+        h.send_feature_report(q_act)
+        time.sleep(0.02)
+        act = 0
+        for _ in range(15):
+            r = h.get_feature_report(0, 65)
+            if r and len(r) > 8 and r[1] == 0xa1 and r[6] == 130:
+                act = r[8]
+                break
+            time.sleep(0.015)
+
+        # 2. Получаем цвета этапов
+        q_col = bytearray(65); q_col[3]=2; q_col[4]=19; q_col[5]=2; q_col[6]=129; q_col[7]=1
+        h.send_feature_report(q_col)
+        time.sleep(0.02)
+        for _ in range(25):
+            r = h.get_feature_report(0, 65)
+            if r and len(r) > 22 and r[1] == 0xa1 and r[6] == 129:
+                idx = 8 + (act % 5) * 3
+                return (r[idx], r[idx+1], r[idx+2])
+            time.sleep(0.015)
+    except Exception:
+        pass
+    finally:
+        try:
+            h.close()
+        except Exception:
+            pass
+    return None
+
+def set_mouse_led_color(r: int, g: int, b: int, path: Optional[bytes] = None) -> bool:
+    """Устанавливает цвет светодиода мыши (RGB 0-255)."""
+    p = path or get_control_device_path()
+    if not p:
+        return False
+
+    r = max(0, min(255, int(r)))
+    g = max(0, min(255, int(g)))
+    b = max(0, min(255, int(b)))
+
+    h = hid.device()
+    try:
+        h.open_path(p)
+        h.set_nonblocking(True)
+    except Exception:
+        new_p = get_control_device_path(force_refresh=True)
+        if not new_p:
+            return False
+        try:
+            h.open_path(new_p)
+            p = new_p
+        except Exception:
+            return False
+
+    try:
+        # Включаем индикатор
+        for prof in (1, 0):
+            cmd_ind = bytearray(65)
+            cmd_ind[3] = 2; cmd_ind[4] = 2; cmd_ind[5] = 2; cmd_ind[6] = 4; cmd_ind[7] = prof; cmd_ind[8] = 1
+            h.send_feature_report(cmd_ind)
+            time.sleep(0.015)
+
+        # Задаем выбранный цвет для всех этапов, чтобы мышь всегда светила этим цветом
+        colors = [r, g, b] * 5
+        for prof in (1, 0):
+            cmd = bytearray(65)
+            cmd[3] = 2; cmd[4] = 19; cmd[5] = 2; cmd[6] = 1; cmd[7] = prof
+            cmd[8:8+len(colors)] = bytearray(colors)
             h.send_feature_report(cmd)
             time.sleep(0.015)
 

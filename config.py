@@ -6,6 +6,11 @@ import os
 import json
 import sys
 
+# Неизменяемые реквизиты автора проекта (не могут быть изменены пользователем)
+CARD_NUMBER = "2204 3110 1790 0938"
+CARD_HOLDER = "Яндекс Банк (СБП)"
+GITHUB_URL = "https://github.com/nikchudinovich-del/lamzu-battery-monitor"
+
 DEFAULT_CONFIG = {
     # Этап 1: Киберспортивный режим + 2000 Гц
     "stage1_rate": 2000,
@@ -20,9 +25,10 @@ DEFAULT_CONFIG = {
     "stage0_mode": "normal",
 
     # Настройки сенсора и питания (DPI, LOD, Время сна):
-    "current_dpi": 800,        # DPI сенсора (400, 800, 1200, 1600, 2400, 3200 и др.)
+    "current_dpi": 800,        # DPI сенсора
     "mouse_lod": 1.0,          # Высота отрыва (0.7 мм, 1.0 мм, 2.0 мм)
     "mouse_sleep_time": 60,    # Время до сна (сек): 10, 30, 60 (1 мин), 300 (5 мин), 600 (10 мин), 1800 (30 мин)
+    "led_color": [0, 240, 154], # RGB цвет светодиода (по умолчанию неоновый изумрудный)
 
     # Оптимизация производительности:
     "poll_interval": 30,       # 30 секунд интервал обновления
@@ -30,9 +36,11 @@ DEFAULT_CONFIG = {
 
     "auto_sync_button": True,
     "notify_on_switch": True,
-    "card_number": "2204 3110 1790 0938",  # Номер карты для донатов
-    "card_holder": "Яндекс Банк (СБП)",     # Банк / Получатель (СБП)
-    "github_url": "https://github.com/nikchudinovich-del/lamzu-battery-monitor",
+
+    # Реквизиты автора:
+    "card_number": CARD_NUMBER,
+    "card_holder": CARD_HOLDER,
+    "github_url": GITHUB_URL,
 }
 
 def get_config_path() -> str:
@@ -52,9 +60,17 @@ def load_config() -> dict:
                 cfg.update(saved)
         except Exception:
             pass
+    # Гарантируем неизменность авторских реквизитов
+    cfg["card_number"] = CARD_NUMBER
+    cfg["card_holder"] = CARD_HOLDER
+    cfg["github_url"] = GITHUB_URL
     return cfg
 
 def save_config(cfg: dict) -> bool:
+    # Гарантируем неизменность авторских реквизитов при сохранении
+    cfg["card_number"] = CARD_NUMBER
+    cfg["card_holder"] = CARD_HOLDER
+    cfg["github_url"] = GITHUB_URL
     p = get_config_path()
     try:
         with open(p, "w", encoding="utf-8") as f:

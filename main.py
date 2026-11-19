@@ -39,6 +39,8 @@ from lamzu_battery import (
     set_mouse_sleep_time,
     get_mouse_dpi,
     set_mouse_dpi,
+    get_mouse_led_color,
+    set_mouse_led_color,
     get_notification_device_path
 )
 from icon_generator import generate_battery_icon
@@ -474,16 +476,20 @@ class LamzuTrayApp:
             return f"{sec} сек"
         return f"{sec // 60} мин"
 
-    def apply_hardware_settings(self):
-        """Применяет сохраненные настройки сенсора (DPI, LOD, время сна) к мыши."""
+    def read_mouse_state(self):
+        """Считывает текущее состояние мыши при запуске БЕЗ перезаписи параметров."""
         def worker():
             try:
-                dpi = self.cfg.get("current_dpi", 800)
-                lod = self.cfg.get("mouse_lod", 1.0)
-                sleep_sec = self.cfg.get("mouse_sleep_time", 60)
-                set_mouse_dpi(dpi)
-                set_mouse_lod(lod)
-                set_mouse_sleep_time(sleep_sec)
+                live_dpi = get_mouse_dpi()
+                if live_dpi:
+                    self.cfg["current_dpi"] = live_dpi
+                live_lod = get_mouse_lod()
+                if live_lod:
+                    self.cfg["mouse_lod"] = live_lod
+                live_sleep = get_mouse_sleep_time()
+                if live_sleep:
+                    self.cfg["mouse_sleep_time"] = live_sleep
+                self.update_tray_icon()
             except Exception:
                 pass
         threading.Thread(target=worker, daemon=True).start()
@@ -498,7 +504,7 @@ class LamzuTrayApp:
         threading.Thread(target=worker, daemon=True).start()
 
     def set_quick_dpi(self, dpi_val: int):
-        """Быстрое переключение DPI из контекстного меню трея."""
+        """Быстрое переключение DPI из контекстного меню трея (только по клику пользователя)."""
         def worker():
             self.cfg["current_dpi"] = dpi_val
             save_config(self.cfg)
@@ -508,11 +514,20 @@ class LamzuTrayApp:
             self.update_tray_icon()
         threading.Thread(target=worker, daemon=True).start()
 
+    def set_quick_led(self, r: int, g: int, b: int):
+        """Быстрое переключение цвета светодиода мыши из меню трея."""
+        def worker():
+            self.cfg["led_color"] = [r, g, b]
+            save_config(self.cfg)
+            set_mouse_led_color(r, g, b)
+            if self.cfg.get("notify_on_switch", True):
+                self.notify("💡 Цвет светодиода обновлен", "LAMZU Maya X")
+        threading.Thread(target=worker, daemon=True).start()
+
     def open_settings(self, icon, item):
         def on_saved(new_cfg):
             self.cfg = new_cfg
             self.apply_stage(self.current_stage, show_notification=False)
-            self.apply_hardware_settings()
             self.update_tray_icon()
 
         from settings_gui import show_settings_dialog
@@ -531,7 +546,7 @@ class LamzuTrayApp:
 
     def open_github(self, icon, item):
         import webbrowser
-        webbrowser.open(self.cfg.get("github_url", "https://github.com/nikchudinovich-del"))
+        webbrowser.open(self.cfg.get("github_url", "https://github.com/nikchudinovich-del/lamzu-battery-monitor"))
 
     def create_menu(self):
         def next_stage_text():
@@ -560,6 +575,22 @@ class LamzuTrayApp:
                 )
             return pystray.Menu(*items)
 
+        def make_led_menu():
+            led_options = [
+                ("🟢 Изумрудный неон", 0, 240, 154),
+                ("🔵 Кибер-голубой", 0, 180, 255),
+                ("🟣 Неоновый фиолетовый", 168, 85, 247),
+                ("🔴 Неоновый красный", 255, 51, 102),
+                ("🟡 Золотой янтарь", 255, 184, 46),
+                ("⚪ Холодный белый", 255, 255, 255),
+            ]
+            items = []
+            for name, r, g, b in led_options:
+                def make_handler(val_r, val_g, val_b):
+                    return lambda icon, it: self.set_quick_led(val_r, val_g, val_b)
+                items.append(item(name, make_handler(r, g, b)))
+            return pystray.Menu(*items)
+
         current_dpi = self.cfg.get("current_dpi", 800)
         current_lod = self.cfg.get("mouse_lod", 1.0)
         current_sleep = self.format_sleep(self.cfg.get("mouse_sleep_time", 60))
@@ -583,7 +614,8 @@ class LamzuTrayApp:
             pystray.Menu.SEPARATOR,
             item(lambda text: next_stage_text(), self.cycle_mode_manual),
             item("🎯 Быстрый выбор DPI", make_dpi_menu()),
-            item("⚙ Настройки мыши (DPI, LOD, Сон)...", self.open_settings),
+            item("💡 Цвет светодиода", make_led_menu()),
+            item("⚙ Настройки мыши (DPI, LOD, Сон, LED)...", self.open_settings),
             pystray.Menu.SEPARATOR,
             item("🔄 Обновить сейчас", self.on_refresh_click),
             item(
@@ -607,8 +639,8 @@ class LamzuTrayApp:
             menu=self.create_menu()
         )
 
-        # Применяем сохраненные настройки сенсора (DPI, LOD, Сон) при запуске
-        self.apply_hardware_settings()
+        # Считываем текущее состояние мыши без перезаписи аппаратных настроек!
+        self.read_mouse_state()
 
         threading.Thread(target=self.battery_worker, daemon=True).start()
         threading.Thread(target=self.notification_listener_worker, daemon=True).start()
