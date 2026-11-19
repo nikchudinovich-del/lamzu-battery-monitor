@@ -1033,7 +1033,7 @@ def get_mouse_dpi_detailed(path: Optional[bytes] = None) -> Optional[Dict[str, A
         stages = []
         for _ in range(25):
             r = h.get_feature_report(0, 65)
-            if r and len(r) > 8 and r[6] == 129:
+            if r and len(r) > 8 and r[6] == 129 and r[5] == 1:
                 cnt = r[8]
                 for i in range(cnt):
                     x = (r[9 + i*4] << 8) | r[10 + i*4]
@@ -1049,7 +1049,7 @@ def get_mouse_dpi_detailed(path: Optional[bytes] = None) -> Optional[Dict[str, A
         colors = []
         for _ in range(25):
             r = h.get_feature_report(0, 65)
-            if r and len(r) > 22 and r[6] == 129:
+            if r and len(r) > 22 and r[6] == 129 and r[5] == 2:
                 for i in range(len(stages) or 5):
                     idx = 8 + i*3
                     colors.append([r[idx], r[idx+1], r[idx+2]])
