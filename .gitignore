@@ -1,0 +1,27 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# PyInstaller
+*.manifest
+*.spec
+build/
+dist/
+
+# Logs and databases
+*.log
+*.sqlite3
+
+# Local configuration
+config.json
+
+# Scratch & research scripts
+scratch_*.py
+
+# OS / Editor files
+.vscode/
+.idea/
+Thumbs.db
+Desktop.ini
+*.tmp
