@@ -32,7 +32,7 @@ DEFAULT_CONFIG = {
     "notify_on_switch": True,
     "card_number": "2204 3110 1790 0938",  # Номер карты для донатов
     "card_holder": "Яндекс Банк (СБП)",     # Банк / Получатель (СБП)
-    "github_url": "https://github.com/nikchudinovich-del",
+    "github_url": "https://github.com/nikchudinovich-del/lamzu-battery-monitor",
 }
 
 def get_config_path() -> str:
