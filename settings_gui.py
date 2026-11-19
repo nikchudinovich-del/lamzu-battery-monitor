@@ -270,6 +270,11 @@ class LamzuControlSuiteGUI:
         self.cfg = load_config()
         self.active_tab = "performance"
         self._slider_job = None
+        self._dpi_apply_timer = None
+        self.stage_cards = []
+        self.stage_val_labels = []
+        self.stage_title_labels = []
+        self.stage_top_rows = []
 
         # Состояние тестера герцовки
         self.tester_active = False
@@ -595,7 +600,10 @@ class LamzuControlSuiteGUI:
         self.stage_cards_frame = tk.Frame(c_dpi, bg="#0f121a")
         self.stage_cards_frame.pack(fill=tk.X, pady=(4, 10))
 
-        self.stage_btn_widgets = []
+        self.stage_cards = []
+        self.stage_val_labels = []
+        self.stage_title_labels = []
+        self.stage_top_rows = []
         for idx, s in enumerate(stages):
             is_active = (idx == active_idx)
             card = tk.Frame(
@@ -608,10 +616,11 @@ class LamzuControlSuiteGUI:
                 cursor="hand2"
             )
             card.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=3)
-            card.bind("<Button-1>", lambda e, i=idx: self.select_dpi_stage(i))
+            self.stage_cards.append(card)
 
             top_row = tk.Frame(card, bg=card["bg"])
             top_row.pack(fill=tk.X)
+            self.stage_top_rows.append(top_row)
 
             # Цветовой индикатор этапа
             c_rgb = s.get("color", [0, 240, 154])
@@ -622,11 +631,16 @@ class LamzuControlSuiteGUI:
 
             lbl_title = tk.Label(top_row, text=f" Этап {idx+1}", font=("Segoe UI", 8, "bold"), fg="#ffffff" if is_active else "#717a8e", bg=card["bg"])
             lbl_title.pack(side=tk.LEFT)
-            lbl_title.bind("<Button-1>", lambda e, i=idx: self.select_dpi_stage(i))
+            self.stage_title_labels.append(lbl_title)
 
             dpi_val_str = f"{s['x']}" if not self.xy_split_var.get() else f"X:{s['x']}\nY:{s['y']}"
             val_lbl = tk.Label(card, text=dpi_val_str, font=("Segoe UI", 10, "bold"), fg="#ff3366" if is_active else "#b5bdcf", bg=card["bg"])
             val_lbl.pack(pady=(4, 0))
+            self.stage_val_labels.append(val_lbl)
+
+            card.bind("<Button-1>", lambda e, i=idx: self.select_dpi_stage(i))
+            top_row.bind("<Button-1>", lambda e, i=idx: self.select_dpi_stage(i))
+            lbl_title.bind("<Button-1>", lambda e, i=idx: self.select_dpi_stage(i))
             val_lbl.bind("<Button-1>", lambda e, i=idx: self.select_dpi_stage(i))
 
         # Ползунок регулировки DPI активного этапа
@@ -634,30 +648,49 @@ class LamzuControlSuiteGUI:
         sl_box = tk.Frame(c_dpi, bg="#0f121a")
         sl_box.pack(fill=tk.X, pady=(6, 0))
 
-        tk.Label(sl_box, text=f"Регулировка DPI для активного этапа {active_idx + 1}:", font=("Segoe UI", 9, "bold"), fg="#e1e7f5", bg="#0f121a").pack(anchor="w")
+        self.dpi_heading_lbl = tk.Label(
+            sl_box,
+            text=f"Регулировка DPI для активного этапа {active_idx + 1} ({cur_stage['x']} DPI):",
+            font=("Segoe UI", 9, "bold"),
+            fg="#e1e7f5",
+            bg="#0f121a"
+        )
+        self.dpi_heading_lbl.pack(anchor="w")
 
         # X DPI Slider
         x_row = tk.Frame(sl_box, bg="#0f121a")
         x_row.pack(fill=tk.X, pady=(4, 2))
         tk.Label(x_row, text="X DPI:", font=("Segoe UI", 9, "bold"), fg="#ff3366", bg="#0f121a", width=6, anchor="w").pack(side=tk.LEFT)
-        self.dpi_x_scale = ttk.Scale(x_row, from_=100, to=30000, value=cur_stage['x'], orient=tk.HORIZONTAL)
+        self.dpi_x_scale = ttk.Scale(
+            x_row,
+            from_=100,
+            to=30000,
+            value=cur_stage['x'],
+            orient=tk.HORIZONTAL,
+            command=self.on_x_slider_change
+        )
         self.dpi_x_scale.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=8)
         self.dpi_x_lbl = tk.Label(x_row, text=f"{cur_stage['x']}", font=("Segoe UI", 9, "bold"), fg="#ffffff", bg="#0f121a", width=6)
         self.dpi_x_lbl.pack(side=tk.RIGHT)
-        self.dpi_x_scale.bind("<Motion>", self.on_x_slider_motion)
-        self.dpi_x_scale.bind("<ButtonRelease-1>", self.on_dpi_slider_release)
+        self.dpi_x_scale.bind("<ButtonRelease-1>", lambda e: self.flush_dpi_apply_now())
 
         # Y DPI Slider (виден только при X-Y Split)
         self.y_row = tk.Frame(sl_box, bg="#0f121a")
         if self.xy_split_var.get():
             self.y_row.pack(fill=tk.X, pady=(2, 2))
         tk.Label(self.y_row, text="Y DPI:", font=("Segoe UI", 9, "bold"), fg="#00b4ff", bg="#0f121a", width=6, anchor="w").pack(side=tk.LEFT)
-        self.dpi_y_scale = ttk.Scale(self.y_row, from_=100, to=30000, value=cur_stage['y'], orient=tk.HORIZONTAL)
+        self.dpi_y_scale = ttk.Scale(
+            self.y_row,
+            from_=100,
+            to=30000,
+            value=cur_stage['y'],
+            orient=tk.HORIZONTAL,
+            command=self.on_y_slider_change
+        )
         self.dpi_y_scale.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=8)
         self.dpi_y_lbl = tk.Label(self.y_row, text=f"{cur_stage['y']}", font=("Segoe UI", 9, "bold"), fg="#ffffff", bg="#0f121a", width=6)
         self.dpi_y_lbl.pack(side=tk.RIGHT)
-        self.dpi_y_scale.bind("<Motion>", self.on_y_slider_motion)
-        self.dpi_y_scale.bind("<ButtonRelease-1>", self.on_dpi_slider_release)
+        self.dpi_y_scale.bind("<ButtonRelease-1>", lambda e: self.flush_dpi_apply_now())
 
         # Быстрые пресеты
         presets_row = tk.Frame(c_dpi, bg="#0f121a")
@@ -770,45 +803,121 @@ class LamzuControlSuiteGUI:
         self.save_and_sync_dpi_stages(f"X-Y Split: {'ВКЛ' if split else 'ВЫКЛ'}")
         self.switch_tab("performance")
 
-    def select_dpi_stage(self, stage_idx: int):
-        self.cfg["active_dpi_stage"] = stage_idx
-        stages = self.cfg.get("dpi_stages", [])
-        if stage_idx < len(stages):
-            self.cfg["current_dpi"] = stages[stage_idx]["x"]
-        self.save_and_sync_dpi_stages(f"Этап {stage_idx + 1} ({self.cfg.get('current_dpi')} DPI)")
-        self.switch_tab("performance")
-
-    def on_x_slider_motion(self, e):
-        val = int(round(self.dpi_x_scale.get() / 50.0) * 50)
+    def on_x_slider_change(self, val_str):
+        val = int(round(float(val_str) / 50.0) * 50)
+        val = max(100, min(30000, val))
         self.dpi_x_lbl.config(text=str(val))
-        if not self.xy_split_var.get():
-            self.dpi_y_scale.set(val)
-            self.dpi_y_lbl.config(text=str(val))
-
-    def on_y_slider_motion(self, e):
-        val = int(round(self.dpi_y_scale.get() / 50.0) * 50)
-        self.dpi_y_lbl.config(text=str(val))
-
-    def on_dpi_slider_release(self, e):
-        x_val = int(round(self.dpi_x_scale.get() / 50.0) * 50)
-        y_val = int(round(self.dpi_y_scale.get() / 50.0) * 50) if self.xy_split_var.get() else x_val
         act_idx = self.cfg.get("active_dpi_stage", 0)
         stages = self.cfg.get("dpi_stages", [])
         if act_idx < len(stages):
-            stages[act_idx]["x"] = x_val
-            stages[act_idx]["y"] = y_val
-        self.cfg["current_dpi"] = x_val
-        self.save_and_sync_dpi_stages(f"DPI: {x_val}")
+            stages[act_idx]["x"] = val
+            if not self.xy_split_var.get():
+                stages[act_idx]["y"] = val
+                self.dpi_y_scale.set(val)
+                self.dpi_y_lbl.config(text=str(val))
+        self.cfg["current_dpi"] = val
+
+        if hasattr(self, "dpi_heading_lbl"):
+            self.dpi_heading_lbl.config(text=f"Регулировка DPI для активного этапа {act_idx + 1} ({val} DPI):")
+        if act_idx < len(self.stage_val_labels):
+            txt = str(val) if not self.xy_split_var.get() else f"X:{val}\nY:{stages[act_idx].get('y', val)}"
+            self.stage_val_labels[act_idx].config(text=txt)
+
+        if self._dpi_apply_timer:
+            self.root.after_cancel(self._dpi_apply_timer)
+        self._dpi_apply_timer = self.root.after(80, self.flush_dpi_apply_now)
+
+    def on_y_slider_change(self, val_str):
+        val = int(round(float(val_str) / 50.0) * 50)
+        val = max(100, min(30000, val))
+        self.dpi_y_lbl.config(text=str(val))
+        act_idx = self.cfg.get("active_dpi_stage", 0)
+        stages = self.cfg.get("dpi_stages", [])
+        if act_idx < len(stages):
+            stages[act_idx]["y"] = val
+        if act_idx < len(self.stage_val_labels):
+            self.stage_val_labels[act_idx].config(text=f"X:{stages[act_idx].get('x', val)}\nY:{val}")
+
+        if self._dpi_apply_timer:
+            self.root.after_cancel(self._dpi_apply_timer)
+        self._dpi_apply_timer = self.root.after(80, self.flush_dpi_apply_now)
+
+    def flush_dpi_apply_now(self):
+        if self._dpi_apply_timer:
+            self.root.after_cancel(self._dpi_apply_timer)
+            self._dpi_apply_timer = None
+        stages = self.cfg.get("dpi_stages", [])
+        act_idx = self.cfg.get("active_dpi_stage", 0)
+        split = self.xy_split_var.get()
+        cur_val = self.cfg.get("current_dpi", 800)
+        self.auto_apply(f"DPI {cur_val}", set_mouse_full_dpi, stages, act_idx, split)
+
+    def select_dpi_stage(self, stage_idx: int):
+        stages = self.cfg.get("dpi_stages", [])
+        if stage_idx >= len(stages):
+            return
+        self.cfg["active_dpi_stage"] = stage_idx
+        cur_x = stages[stage_idx]["x"]
+        cur_y = stages[stage_idx].get("y", cur_x)
+        self.cfg["current_dpi"] = cur_x
+
+        # Обновляем визуальное выделение карточек без мерцания и перерисовки всей вкладки
+        for idx, card in enumerate(self.stage_cards):
+            is_act = (idx == stage_idx)
+            card.config(
+                bg="#1c2130" if is_act else "#12151f",
+                highlightbackground="#ff3366" if is_act else "#222738",
+                highlightthickness=2 if is_act else 1
+            )
+            if idx < len(self.stage_top_rows):
+                self.stage_top_rows[idx].config(bg="#1c2130" if is_act else "#12151f")
+            if idx < len(self.stage_title_labels):
+                self.stage_title_labels[idx].config(
+                    bg="#1c2130" if is_act else "#12151f",
+                    fg="#ffffff" if is_act else "#717a8e"
+                )
+            if idx < len(self.stage_val_labels):
+                self.stage_val_labels[idx].config(
+                    bg="#1c2130" if is_act else "#12151f",
+                    fg="#ff3366" if is_act else "#b5bdcf"
+                )
+
+        if hasattr(self, "dpi_heading_lbl"):
+            self.dpi_heading_lbl.config(text=f"Регулировка DPI для активного этапа {stage_idx + 1} ({cur_x} DPI):")
+        if hasattr(self, "dpi_x_scale"):
+            self.dpi_x_scale.set(cur_x)
+            self.dpi_x_lbl.config(text=str(cur_x))
+        if hasattr(self, "dpi_y_scale"):
+            self.dpi_y_scale.set(cur_y)
+            self.dpi_y_lbl.config(text=str(cur_y))
+
+        split = self.xy_split_var.get()
+        self.auto_apply(f"Этап {stage_idx + 1} ({cur_x} DPI)", set_mouse_full_dpi, stages, stage_idx, split)
 
     def apply_quick_preset_dpi(self, dpi_val: int):
         act_idx = self.cfg.get("active_dpi_stage", 0)
         stages = self.cfg.get("dpi_stages", [])
         if act_idx < len(stages):
             stages[act_idx]["x"] = dpi_val
-            stages[act_idx]["y"] = dpi_val
+            if not self.xy_split_var.get():
+                stages[act_idx]["y"] = dpi_val
         self.cfg["current_dpi"] = dpi_val
-        self.save_and_sync_dpi_stages(f"DPI: {dpi_val}")
-        self.switch_tab("performance")
+
+        if hasattr(self, "dpi_heading_lbl"):
+            self.dpi_heading_lbl.config(text=f"Регулировка DPI для активного этапа {act_idx + 1} ({dpi_val} DPI):")
+        if hasattr(self, "dpi_x_scale"):
+            self.dpi_x_scale.set(dpi_val)
+            self.dpi_x_lbl.config(text=str(dpi_val))
+        if hasattr(self, "dpi_y_scale") and not self.xy_split_var.get():
+            self.dpi_y_scale.set(dpi_val)
+            self.dpi_y_lbl.config(text=str(dpi_val))
+
+        if act_idx < len(self.stage_val_labels):
+            txt = str(dpi_val) if not self.xy_split_var.get() else f"X:{dpi_val}\nY:{stages[act_idx].get('y', dpi_val)}"
+            self.stage_val_labels[act_idx].config(text=txt)
+
+        split = self.xy_split_var.get()
+        self.auto_apply(f"DPI: {dpi_val}", set_mouse_full_dpi, stages, act_idx, split)
 
     def pick_stage_color(self, stage_idx: int):
         stages = self.cfg.get("dpi_stages", [])

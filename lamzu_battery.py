@@ -605,18 +605,10 @@ def set_mouse_dpi(dpi: int, path: Optional[bytes] = None) -> bool:
 
     try:
         # Гарантируем отключение раздельного DPI по осям X и Y (100% симметричное движение)
-        for prof in (1, 0):
-            cmd_xy = bytearray(65)
-            cmd_xy[3] = 2; cmd_xy[4] = 2; cmd_xy[5] = 1; cmd_xy[6] = 13; cmd_xy[7] = prof; cmd_xy[8] = 0
-            h.send_feature_report(cmd_xy)
-            time.sleep(0.015)
-
-        # Сбрасываем Angle Tune (угол доворота курсора строго в 0)
-        for prof in (1, 0):
-            cmd_angle = bytearray(65)
-            cmd_angle[3] = 2; cmd_angle[4] = 2; cmd_angle[5] = 1; cmd_angle[6] = 20; cmd_angle[7] = prof; cmd_angle[8] = 0
-            h.send_feature_report(cmd_angle)
-            time.sleep(0.015)
+        cmd_xy = bytearray(65)
+        cmd_xy[3] = 2; cmd_xy[4] = 2; cmd_xy[5] = 1; cmd_xy[6] = 13; cmd_xy[7] = 1; cmd_xy[8] = 0
+        h.send_feature_report(cmd_xy)
+        time.sleep(0.015)
 
         # Считываем текущие этапы DPI
         q_dpi = bytearray(65)
@@ -642,31 +634,29 @@ def set_mouse_dpi(dpi: int, path: Optional[bytes] = None) -> bool:
         if not dpis or len(dpis) < 5:
             dpis = [800, 1200, 1600, 2400, 3200]
 
-        target_stage = 0
+        target_stage_1based = 1
         if dpi in dpis:
-            target_stage = dpis.index(dpi)
+            target_stage_1based = dpis.index(dpi) + 1
         else:
             dpis[0] = dpi
-            target_stage = 0
+            target_stage_1based = 1
 
         # Формируем буфер: X и Y строго равны!
         buf = bytearray()
         for d in dpis:
             buf.extend([(d >> 8) & 0xff, d & 0xff, (d >> 8) & 0xff, d & 0xff])
 
-        for prof in (1, 0):
-            cmd = bytearray(65)
-            cmd[3] = 2; cmd[4] = 2 + len(buf); cmd[5] = 1; cmd[6] = 1; cmd[7] = prof; cmd[8] = len(dpis)
-            cmd[9:9+len(buf)] = buf
-            h.send_feature_report(cmd)
-            time.sleep(0.015)
+        cmd = bytearray(65)
+        cmd[3] = 2; cmd[4] = 26; cmd[5] = 1; cmd[6] = 1; cmd[7] = 1; cmd[8] = len(dpis)
+        cmd[9:9+len(buf)] = buf
+        h.send_feature_report(cmd)
+        time.sleep(0.02)
 
-        # Активируем выбранный этап
-        for prof in (1, 0):
-            cmd = bytearray(65)
-            cmd[3] = 2; cmd[4] = 2; cmd[5] = 1; cmd[6] = 2; cmd[7] = prof; cmd[8] = target_stage
-            h.send_feature_report(cmd)
-            time.sleep(0.015)
+        # Активируем выбранный этап (1-based: 1..len(dpis))
+        cmd_act = bytearray(65)
+        cmd_act[3] = 2; cmd_act[4] = 2; cmd_act[5] = 1; cmd_act[6] = 2; cmd_act[7] = 1; cmd_act[8] = target_stage_1based
+        h.send_feature_report(cmd_act)
+        time.sleep(0.02)
 
         return True
     except Exception:
@@ -1018,7 +1008,9 @@ def get_mouse_dpi_detailed(path: Optional[bytes] = None) -> Optional[Dict[str, A
         for _ in range(15):
             r = h.get_feature_report(0, 65)
             if r and len(r) > 8 and r[6] == 130:
-                active_idx = r[8]
+                raw_act = r[8]
+                # Аппаратный индекс этапа 1-based (1..cnt), приводим к 0-based для GUI
+                active_idx = max(0, raw_act - 1) if raw_act >= 1 else 0
                 break
             time.sleep(0.01)
 
@@ -1097,13 +1089,12 @@ def set_mouse_full_dpi(stages: list, active_idx: int, xy_split: bool = False, pa
         except Exception:
             return False
     try:
-        # 1. XY Split on/off
+        # 1. XY Split on/off (строго Profile 1)
         split_val = 1 if xy_split else 0
-        for prof in (1, 0):
-            cmd_xy = bytearray(65)
-            cmd_xy[3]=2; cmd_xy[4]=2; cmd_xy[5]=1; cmd_xy[6]=13; cmd_xy[7]=prof; cmd_xy[8]=split_val
-            h.send_feature_report(cmd_xy)
-            time.sleep(0.015)
+        cmd_xy = bytearray(65)
+        cmd_xy[3]=2; cmd_xy[4]=2; cmd_xy[5]=1; cmd_xy[6]=13; cmd_xy[7]=1; cmd_xy[8]=split_val
+        h.send_feature_report(cmd_xy)
+        time.sleep(0.015)
 
         # 2. Stage values buffer
         buf = bytearray()
@@ -1115,32 +1106,29 @@ def set_mouse_full_dpi(stages: list, active_idx: int, xy_split: bool = False, pa
             c = s.get("color", [0, 240, 154])
             colors_flat.extend([int(c[0]), int(c[1]), int(c[2])])
 
-        # 3. Write stages
-        for prof in (1, 0):
-            cmd = bytearray(65)
-            cmd[3]=2; cmd[4]=2 + len(buf); cmd[5]=1; cmd[6]=1; cmd[7]=prof; cmd[8]=len(stages)
-            cmd[9:9+len(buf)] = buf
-            h.send_feature_report(cmd)
-            time.sleep(0.015)
+        # 3. Write stages (длина пакета 26 по спецификации Nordic)
+        cmd = bytearray(65)
+        cmd[3]=2; cmd[4]=26; cmd[5]=1; cmd[6]=1; cmd[7]=1; cmd[8]=len(stages)
+        cmd[9:9+len(buf)] = buf
+        h.send_feature_report(cmd)
+        time.sleep(0.02)
 
-        # 4. Activate chosen stage
-        target_stage = max(0, min(len(stages)-1, int(active_idx)))
-        for prof in (1, 0):
-            cmd = bytearray(65)
-            cmd[3]=2; cmd[4]=2; cmd[5]=1; cmd[6]=2; cmd[7]=prof; cmd[8]=target_stage
-            h.send_feature_report(cmd)
-            time.sleep(0.015)
+        # 4. Activate chosen stage (1-based: 1..len(stages))
+        target_stage = max(1, min(len(stages), int(active_idx) + 1))
+        cmd_act = bytearray(65)
+        cmd_act[3]=2; cmd_act[4]=2; cmd_act[5]=1; cmd_act[6]=2; cmd_act[7]=1; cmd_act[8]=target_stage
+        h.send_feature_report(cmd_act)
+        time.sleep(0.02)
 
         # 5. Write stage colors if provided
         if colors_flat:
             while len(colors_flat) < 15:
                 colors_flat.extend([0, 240, 154])
-            for prof in (1, 0):
-                cmd_c = bytearray(65)
-                cmd_c[3]=2; cmd_c[4]=19; cmd_c[5]=2; cmd_c[6]=1; cmd_c[7]=prof
-                cmd_c[8:8+15] = bytearray(colors_flat[:15])
-                h.send_feature_report(cmd_c)
-                time.sleep(0.015)
+            cmd_c = bytearray(65)
+            cmd_c[3]=2; cmd_c[4]=19; cmd_c[5]=2; cmd_c[6]=1; cmd_c[7]=1
+            cmd_c[8:8+15] = bytearray(colors_flat[:15])
+            h.send_feature_report(cmd_c)
+            time.sleep(0.015)
 
         return True
     except Exception:
