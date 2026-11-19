@@ -41,10 +41,15 @@ from lamzu_battery import (
     set_mouse_dpi,
     get_mouse_led_color,
     set_mouse_led_color,
+    get_mouse_bottom_button,
+    set_mouse_bottom_button,
+    BOTTOM_BUTTON_MODES,
+    CODE_TO_RATE,
     get_notification_device_path
 )
 from icon_generator import generate_battery_icon
 from config import load_config, save_config
+from settings_gui import notify_gui_hardware_change
 
 APP_NAME = "LamzuBatteryTray"
 DEFAULT_POLL_INTERVAL = 30
@@ -228,6 +233,39 @@ class LamzuTrayApp:
 
         self.last_hardware_state = (1 if high_speed else 0, 1 if tracking else 0)
         self.update_tray_icon()
+        notify_gui_hardware_change("mode", (high_speed, tracking))
+
+    def on_hardware_dpi_changed(self, stage_idx: int, dpi_x: int, dpi_y: int):
+        """Вызывается при аппаратной смене DPI (например нижней кнопкой в режиме DPI Loop)."""
+        self.cfg["active_dpi_stage"] = stage_idx
+        self.cfg["current_dpi"] = dpi_x
+        stages = self.cfg.get("dpi_stages", [])
+        if stage_idx < len(stages):
+            stages[stage_idx]["x"] = dpi_x
+            stages[stage_idx]["y"] = dpi_y
+        save_config(self.cfg)
+        if self.cfg.get("notify_on_switch", True):
+            self.notify(f"🎯 DPI: {dpi_x} (Этап {stage_idx + 1})", "LAMZU Maya X")
+        self.update_tray_icon()
+        notify_gui_hardware_change("dpi", (stage_idx, dpi_x, dpi_y))
+
+    def on_hardware_rate_changed(self, rate_hz: int):
+        """Вызывается при аппаратной смене частоты опроса (кнопкой в режиме PollingRate)."""
+        self.cfg["polling_rate"] = rate_hz
+        save_config(self.cfg)
+        if self.cfg.get("notify_on_switch", True):
+            self.notify(f"⚡ Частота опроса: {rate_hz} Гц", "LAMZU Maya X")
+        self.update_tray_icon()
+        notify_gui_hardware_change("rate", rate_hz)
+
+    def on_hardware_lod_changed(self, lod_mm: float):
+        """Вызывается при аппаратной смене высоты отрыва (кнопкой в режиме LOD)."""
+        self.cfg["mouse_lod"] = lod_mm
+        save_config(self.cfg)
+        if self.cfg.get("notify_on_switch", True):
+            self.notify(f"📏 Высота отрыва LOD: {lod_mm} мм", "LAMZU Maya X")
+        self.update_tray_icon()
+        notify_gui_hardware_change("lod", lod_mm)
 
     def apply_stage(self, stage: int, show_notification: bool = True):
         """Ручное применение одного из 3-х этапов из меню или настроек."""
@@ -304,7 +342,7 @@ class LamzuTrayApp:
                     if len(data) >= 4 and data[0] == 4:
                         report_type = data[1]
 
-                        # 1. Нажатие физической кнопки под мышкой (смена режимов)
+                        # 1. Нажатие физической кнопки под мышкой (Competition Mode / HyperMode)
                         if report_type == 13:
                             hs = (data[2] == 1)
                             tr = (data[3] == 1)
@@ -323,6 +361,25 @@ class LamzuTrayApp:
                                     now_str = datetime.now().strftime("%H:%M:%S")
                                     self.last_update_str = f"{self.product_name}: {bat}% ({state_str})\nРежим: {self.mode_str}\nОбновлено: {now_str}"
                                 self.update_tray_icon()
+
+                        # 3. Аппаратное переключение этапа DPI (DPI Loop)
+                        elif report_type == 1 and len(data) >= 7:
+                            stage = data[2]
+                            dpi_x = (data[3] << 8) + data[4]
+                            dpi_y = (data[5] << 8) + data[6]
+                            self.on_hardware_dpi_changed(stage - 1, dpi_x, dpi_y)
+
+                        # 4. Аппаратное переключение частоты опроса (Polling Rate)
+                        elif report_type == 8:
+                            code = data[2]
+                            rate_hz = CODE_TO_RATE.get(code, 1000)
+                            self.on_hardware_rate_changed(rate_hz)
+
+                        # 5. Аппаратное переключение высоты отрыва (LOD)
+                        elif report_type == 7:
+                            code = data[2]
+                            lod_mm = 1.0 if code == 1 else (2.0 if code == 2 else 0.7)
+                            self.on_hardware_lod_changed(lod_mm)
 
             except Exception:
                 pass
@@ -535,6 +592,19 @@ class LamzuTrayApp:
                 self.notify("💡 Цвет светодиода обновлен", "LAMZU Maya X")
         threading.Thread(target=worker, daemon=True).start()
 
+    def set_quick_bottom_button(self, mode_key: str):
+        """Быстрое переключение функции нижней кнопки из трея."""
+        def worker():
+            self.cfg["bottom_button"] = mode_key
+            save_config(self.cfg)
+            set_mouse_bottom_button(mode_key)
+            name = BOTTOM_BUTTON_MODES.get(mode_key, {}).get("name", mode_key)
+            if self.cfg.get("notify_on_switch", True):
+                self.notify(f"🔘 Нижняя кнопка: {name}", "LAMZU Maya X")
+            self.update_tray_icon()
+            notify_gui_hardware_change("bottom_button", mode_key)
+        threading.Thread(target=worker, daemon=True).start()
+
     def open_settings(self, icon, item):
         def on_changed(param_name, val):
             self.cfg = load_config()
@@ -596,6 +666,22 @@ class LamzuTrayApp:
                 items.append(item(f"{r} Гц", make_handler(r), checked=make_checker(r)))
             return pystray.Menu(*items)
 
+        def make_bottom_button_menu():
+            bb_options = [
+                ("competition", "👑 Competition Mode (По умолчанию)"),
+                ("dpi_loop", "🎯 DPI Loop (Цикл DPI)"),
+                ("polling_rate", "⚡ PollingRate (Частота)"),
+                ("lod", "📏 LOD (Высота отрыва)")
+            ]
+            items = []
+            for key, name in bb_options:
+                def make_handler(k):
+                    return lambda icon, it: self.set_quick_bottom_button(k)
+                def make_checker(k):
+                    return lambda it: self.cfg.get("bottom_button", "competition") == k
+                items.append(item(name, make_handler(key), checked=make_checker(key)))
+            return pystray.Menu(*items)
+
         def make_led_menu():
             led_options = [
                 ("🟢 Изумрудный неон", 0, 240, 154),
@@ -636,6 +722,7 @@ class LamzuTrayApp:
             item(lambda text: next_stage_text(), self.cycle_mode_manual),
             item("🎯 Быстрый выбор DPI", make_dpi_menu()),
             item("⚡ Частота опроса (Гц)", make_rate_menu()),
+            item("🔘 Функция нижней кнопки", make_bottom_button_menu()),
             item("💡 Цвет светодиода", make_led_menu()),
             item("🛠 Панель управления LAMZU Studio...", self.open_settings),
             pystray.Menu.SEPARATOR,

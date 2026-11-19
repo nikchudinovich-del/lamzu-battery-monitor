@@ -1209,9 +1209,14 @@ def factory_reset_mouse(path: Optional[bytes] = None) -> bool:
             cmd[9:9+len(buf)] = buf
             send(cmd)
 
-        # Активация 800 DPI
+        # Активация 800 DPI (Stage 1 = 1)
         for prof in (1, 0):
-            cmd = bytearray(65); cmd[3] = 2; cmd[4] = 2; cmd[5] = 1; cmd[6] = 2; cmd[7] = prof; cmd[8] = 0
+            cmd = bytearray(65); cmd[3] = 2; cmd[4] = 2; cmd[5] = 1; cmd[6] = 2; cmd[7] = prof; cmd[8] = 1
+            send(cmd)
+
+        # Восстановление нижней кнопки в Competition Mode
+        for prof in (1, 0):
+            cmd = bytearray(65); cmd[3] = 2; cmd[4] = 6; cmd[5] = 3; cmd[6] = 0; cmd[7] = prof; cmd[8] = 20; cmd[10] = 20; cmd[11] = 1; cmd[12] = 0
             send(cmd)
 
         return True
@@ -1220,3 +1225,114 @@ def factory_reset_mouse(path: Optional[bytes] = None) -> bool:
     finally:
         try: h.close()
         except Exception: pass
+
+
+BOTTOM_BUTTON_MODES = {
+    "competition": {"func": 20, "data": 0, "name": "Competition Mode (По умолчанию)"},
+    "dpi_loop": {"func": 7, "data": 6, "name": "DPI Loop (Цикл DPI)"},
+    "polling_rate": {"func": 13, "data": 3, "name": "PollingRate (Частота опроса)"},
+    "lod": {"func": 14, "data": 3, "name": "LOD (Высота отрыва)"},
+}
+
+FUNC_TO_BOTTOM_MODE = {
+    20: "competition",
+    7: "dpi_loop",
+    13: "polling_rate",
+    14: "lod",
+}
+
+def get_mouse_bottom_button(path: Optional[bytes] = None) -> Optional[str]:
+    """Возвращает текущую функцию нижней физической кнопки мыши ('competition', 'dpi_loop', 'polling_rate', 'lod')."""
+    p = path or get_control_device_path()
+    if not p:
+        return None
+    h = hid.device()
+    try:
+        h.open_path(p)
+        h.set_nonblocking(True)
+    except Exception:
+        new_p = get_control_device_path(force_refresh=True)
+        if not new_p:
+            return None
+        try:
+            h.open_path(new_p)
+            h.set_nonblocking(True)
+            p = new_p
+        except Exception:
+            return None
+
+    try:
+        q = bytearray(65)
+        q[0] = 0x00
+        q[3] = 0x02
+        q[4] = 0x05
+        q[5] = 0x03  # Category 3: Button
+        q[6] = 128   # Opcode 128: GetButton
+        q[7] = 1     # Profile 1
+        q[8] = 20    # Button 20 (DPILoopUp / Bottom Button)
+        h.send_feature_report(q)
+        time.sleep(0.02)
+        for _ in range(20):
+            r = h.get_feature_report(0, 65)
+            if r and len(r) > 10 and r[1] == 0xa1 and r[5] == 3 and r[6] == 128 and r[8] == 20:
+                func = r[10]
+                return FUNC_TO_BOTTOM_MODE.get(func, "competition")
+            time.sleep(0.01)
+    except Exception:
+        pass
+    finally:
+        try:
+            h.close()
+        except Exception:
+            pass
+    return None
+
+def set_mouse_bottom_button(mode_key: str, path: Optional[bytes] = None) -> bool:
+    """Устанавливает функцию нижней физической кнопки мыши."""
+    info = BOTTOM_BUTTON_MODES.get(mode_key)
+    if not info:
+        return False
+    func = info["func"]
+    data0 = info["data"]
+
+    p = path or get_control_device_path()
+    if not p:
+        return False
+    h = hid.device()
+    try:
+        h.open_path(p)
+    except Exception:
+        new_p = get_control_device_path(force_refresh=True)
+        if not new_p:
+            return False
+        try:
+            h.open_path(new_p)
+            p = new_p
+        except Exception:
+            return False
+
+    try:
+        for prof in (1, 0):
+            q = bytearray(65)
+            q[0] = 0x00
+            q[3] = 0x02
+            q[4] = 0x06  # length 5 + 1
+            q[5] = 0x03  # Category 3: Button
+            q[6] = 0x00  # Opcode 0: SetButton
+            q[7] = prof
+            q[8] = 20    # Button 20
+            q[9] = 0
+            q[10] = func
+            q[11] = 1    # len 1
+            q[12] = data0
+            h.send_feature_report(q)
+            time.sleep(0.02)
+        return True
+    except Exception:
+        return False
+    finally:
+        try:
+            h.close()
+        except Exception:
+            pass
+

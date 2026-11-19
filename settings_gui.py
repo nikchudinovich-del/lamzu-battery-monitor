@@ -43,8 +43,21 @@ from lamzu_battery import (
     get_mouse_angle_snap, set_mouse_angle_snap,
     get_mouse_angle_tune, set_mouse_angle_tune,
     get_mouse_dpi_detailed, set_mouse_full_dpi,
+    get_mouse_bottom_button, set_mouse_bottom_button, BOTTOM_BUTTON_MODES,
     factory_reset_mouse, query_aurora_battery, get_control_device_path
 )
+
+_current_gui_instance = None
+
+def notify_gui_hardware_change(event_type: str, val: Any):
+    """Оповещает активное окно настроек об аппаратных событиях мыши."""
+    global _current_gui_instance
+    if _current_gui_instance and hasattr(_current_gui_instance, 'root') and _current_gui_instance.root.winfo_exists():
+        try:
+            _current_gui_instance.root.after(0, lambda: _current_gui_instance.on_hardware_event(event_type, val))
+        except Exception:
+            pass
+
 
 def enable_dark_title_bar(window):
     """Включает нативную тёмную тему для заголовка окна Windows 10/11."""
@@ -276,6 +289,9 @@ class LamzuControlSuiteGUI:
         self.stage_title_labels = []
         self.stage_top_rows = []
 
+        # Настройка тёмных неоновых стилей ttk
+        self.setup_ttk_styles()
+
         # Состояние тестера герцовки
         self.tester_active = False
         self.hz_history = []
@@ -299,6 +315,51 @@ class LamzuControlSuiteGUI:
         # Показываем вкладку по умолчанию
         self.switch_tab("performance")
 
+        # Фоновый опрос для синхронизации батареи
+        self.root.after(2500, self.periodic_sync)
+
+    def setup_ttk_styles(self):
+        """Создает стильные темные неоновые ползунки вместо стандартных белых."""
+        self.style = ttk.Style()
+        try:
+            self.style.theme_use('clam')
+        except Exception:
+            pass
+
+        # Ползунок X DPI: Неоновый маджента / розовый акцент
+        self.style.configure(
+            "DPIX.Horizontal.TScale",
+            troughcolor="#131622",
+            background="#ff3366",
+            bordercolor="#222838",
+            lightcolor="#ff5c8a",
+            darkcolor="#d91b4f",
+            sliderlength=22,
+            sliderthickness=14
+        )
+        # Ползунок Y DPI: Неоновый кибер-голубой
+        self.style.configure(
+            "DPIY.Horizontal.TScale",
+            troughcolor="#131622",
+            background="#00b4ff",
+            bordercolor="#222838",
+            lightcolor="#38c6ff",
+            darkcolor="#008ecc",
+            sliderlength=22,
+            sliderthickness=14
+        )
+        # Ползунок Angle Tune: Изумрудный неон
+        self.style.configure(
+            "Angle.Horizontal.TScale",
+            troughcolor="#131622",
+            background="#00f09a",
+            bordercolor="#222838",
+            lightcolor="#2bf5a8",
+            darkcolor="#00c87e",
+            sliderlength=22,
+            sliderthickness=14
+        )
+
     def read_live_mouse_state(self):
         """Считывает текущие аппаратные параметры мыши."""
         try:
@@ -309,37 +370,52 @@ class LamzuControlSuiteGUI:
                 if dpi_info.get("stages"):
                     self.cfg["dpi_stages"] = dpi_info["stages"]
                     self.cfg["stage_count"] = len(dpi_info["stages"])
+                    act_idx = self.cfg["active_dpi_stage"]
+                    if act_idx < len(dpi_info["stages"]):
+                        self.cfg["current_dpi"] = dpi_info["stages"][act_idx]["x"]
 
             d_rate = get_mouse_polling_rate()
-            if d_rate: self.cfg["polling_rate"] = d_rate
-            else: self.cfg["polling_rate"] = 1000
+            if d_rate:
+                self.cfg["polling_rate"] = d_rate
 
             d_deb = get_mouse_debounce()
-            if d_deb is not None: self.cfg["debounce_time"] = d_deb
+            if d_deb is not None:
+                self.cfg["debounce_time"] = d_deb
 
             d_ms = get_mouse_motion_sync()
-            if d_ms is not None: self.cfg["motion_sync"] = d_ms
+            if d_ms is not None:
+                self.cfg["motion_sync"] = d_ms
 
             d_rc = get_mouse_ripple_control()
-            if d_rc is not None: self.cfg["ripple_control"] = d_rc
+            if d_rc is not None:
+                self.cfg["ripple_control"] = d_rc
 
             d_as = get_mouse_angle_snap()
-            if d_as is not None: self.cfg["angle_snap"] = d_as
+            if d_as is not None:
+                self.cfg["angle_snap"] = d_as
 
             d_at = get_mouse_angle_tune()
-            if d_at is not None: self.cfg["angle_tune"] = d_at
+            if d_at is not None:
+                self.cfg["angle_tune"] = d_at
 
             d_lod = get_mouse_lod()
-            if d_lod is not None: self.cfg["mouse_lod"] = d_lod
+            if d_lod is not None:
+                self.cfg["mouse_lod"] = d_lod
 
             d_sl = get_mouse_sleep_time()
-            if d_sl is not None: self.cfg["mouse_sleep_time"] = d_sl
+            if d_sl is not None:
+                self.cfg["mouse_sleep_time"] = d_sl
 
             d_hyp = get_mouse_hyper_mode()
-            if d_hyp is not None: self.cfg["hyper_mode"] = (d_hyp == 1)
+            if d_hyp is not None:
+                self.cfg["hyper_mode"] = (d_hyp == 1)
 
             d_tr = get_mouse_tracking_mode()
-            if d_tr is not None: self.cfg["tracking_20k"] = (d_tr == 1)
+            if d_tr is not None:
+                self.cfg["tracking_20k"] = (d_tr == 1)
+
+            d_bb = get_mouse_bottom_button()
+            self.cfg["bottom_button"] = d_bb or self.cfg.get("bottom_button", "competition")
 
         except Exception:
             pass
@@ -406,22 +482,8 @@ class LamzuControlSuiteGUI:
         right = tk.Frame(header, bg="#07080c")
         right.pack(side=tk.RIGHT)
 
-        # Плашка 20K FPS
-        self.fps_badge = tk.Label(
-            right,
-            text=" 20K FPS: ВКЛ " if self.cfg.get("tracking_20k") else " 20K FPS: ВЫКЛ ",
-            font=("Segoe UI", 8, "bold"),
-            fg="#c084fc" if self.cfg.get("tracking_20k") else "#5a6275",
-            bg="#1d152b" if self.cfg.get("tracking_20k") else "#12141c",
-            padx=8,
-            pady=3,
-            cursor="hand2"
-        )
-        self.fps_badge.pack(side=tk.LEFT, padx=(0, 10))
-        self.fps_badge.bind("<Button-1>", lambda e: self.toggle_20k_fps())
-
         # Плашка батареи
-        self.bat_frame = tk.Frame(right, bg="#10131c", padx=10, pady=3, highlightbackground="#1e2433", highlightthickness=1)
+        self.bat_frame = tk.Frame(right, bg="#10131c", padx=12, pady=4, highlightbackground="#1e2433", highlightthickness=1)
         self.bat_frame.pack(side=tk.LEFT)
 
         self.bat_lbl = tk.Label(
@@ -453,11 +515,12 @@ class LamzuControlSuiteGUI:
     def toggle_20k_fps(self):
         cur = not self.cfg.get("tracking_20k", False)
         self.cfg["tracking_20k"] = cur
-        self.fps_badge.config(
-            text=" 20K FPS: ВКЛ " if cur else " 20K FPS: ВЫКЛ ",
-            fg="#c084fc" if cur else "#5a6275",
-            bg="#1d152b" if cur else "#12141c"
-        )
+        if hasattr(self, 'fps_badge') and self.fps_badge and self.fps_badge.winfo_exists():
+            self.fps_badge.config(
+                text=" 20K FPS: ВКЛ " if cur else " 20K FPS: ВЫКЛ ",
+                fg="#c084fc" if cur else "#5a6275",
+                bg="#1d152b" if cur else "#12141c"
+            )
         self.auto_apply("Режим 20K FPS", set_mouse_tracking_mode, cur)
 
     def create_navigation(self):
@@ -667,6 +730,7 @@ class LamzuControlSuiteGUI:
             to=30000,
             value=cur_stage['x'],
             orient=tk.HORIZONTAL,
+            style="DPIX.Horizontal.TScale",
             command=self.on_x_slider_change
         )
         self.dpi_x_scale.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=8)
@@ -685,6 +749,7 @@ class LamzuControlSuiteGUI:
             to=30000,
             value=cur_stage['y'],
             orient=tk.HORIZONTAL,
+            style="DPIY.Horizontal.TScale",
             command=self.on_y_slider_change
         )
         self.dpi_y_scale.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=8)
@@ -775,7 +840,7 @@ class LamzuControlSuiteGUI:
         t_row = tk.Frame(tune_box, bg="#0f121a")
         t_row.pack(fill=tk.X)
 
-        self.angle_scale = ttk.Scale(t_row, from_=-30, to=30, value=self.cfg.get("angle_tune", 0), orient=tk.HORIZONTAL)
+        self.angle_scale = ttk.Scale(t_row, from_=-30, to=30, value=self.cfg.get("angle_tune", 0), orient=tk.HORIZONTAL, style="Angle.Horizontal.TScale")
         self.angle_scale.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 8))
 
         self.angle_lbl = tk.Label(t_row, text=f"{self.cfg.get('angle_tune', 0)}°", font=("Segoe UI", 9, "bold"), fg="#00f09a", bg="#0f121a", width=4)
@@ -1098,29 +1163,49 @@ class LamzuControlSuiteGUI:
         c_btns = tk.Frame(right_col, bg="#0f121a", padx=16, pady=14, highlightbackground="#1a202e", highlightthickness=1)
         c_btns.pack(fill=tk.BOTH, expand=True)
 
-        tk.Label(c_btns, text="Кнопки мыши & Заводской сброс", font=("Segoe UI", 11, "bold"), fg="#ffffff", bg="#0f121a").pack(anchor="w")
-        tk.Label(c_btns, text="Текущая раскладка физических кнопок LAMZU Maya X:", font=("Segoe UI", 8), fg="#6d768a", bg="#0f121a").pack(anchor="w", pady=(1, 8))
+        tk.Label(c_btns, text="Кнопки мыши & Нижняя кнопка", font=("Segoe UI", 11, "bold"), fg="#ffffff", bg="#0f121a").pack(anchor="w")
+        tk.Label(c_btns, text="Назначение физических кнопок и переключателя основания мыши:", font=("Segoe UI", 8), fg="#6d768a", bg="#0f121a").pack(anchor="w", pady=(1, 8))
 
-        btn_grid = tk.Frame(c_btns, bg="#0f121a")
-        btn_grid.pack(fill=tk.X, pady=(0, 10))
+        # Выбор функции нижней кнопки (Bottom Button)
+        bb_card = tk.Frame(c_btns, bg="#131622", padx=12, pady=10, highlightbackground="#22293b", highlightthickness=1)
+        bb_card.pack(fill=tk.X, pady=(0, 10))
 
-        labels = [
-            ("Кнопка 1 (Left):", "Левый клик (Left Click)"),
-            ("Кнопка 2 (Right):", "Правый клик (Right Click)"),
-            ("Кнопка 3 (Middle):", "Колёсико мыши (Wheel Click)"),
-            ("Кнопка 4 (Forward):", "Вперёд (Browser Forward)"),
-            ("Кнопка 5 (Back):", "Назад (Browser Back)"),
-            ("Кнопка 6 (Bottom):", "3-этапный переключатель герцовки")
+        tk.Label(bb_card, text="🔘 Нижняя кнопка (Bottom Button):", font=("Segoe UI", 9, "bold"), fg="#ffffff", bg="#131622").pack(anchor="w")
+        tk.Label(bb_card, text="Действие физической кнопки на основании мыши:", font=("Segoe UI", 8), fg="#6d768a", bg="#131622").pack(anchor="w", pady=(1, 6))
+
+        cur_bb = self.cfg.get("bottom_button", "competition")
+        self.bb_var = tk.StringVar(value=cur_bb)
+
+        bb_options = [
+            ("competition", "👑 Competition Mode (По умолчанию)", "Режим киберспорта / Fn"),
+            ("dpi_loop", "🎯 DPI Loop (Цикл DPI)", "Циклическое переключение этапов 1-5"),
+            ("polling_rate", "⚡ PollingRate (Частота)", "Циклическое переключение 1000..8000 Гц"),
+            ("lod", "📏 LOD (Высота отрыва)", "Переключение отрыва 1.0 мм / 2.0 мм")
         ]
-        for k_lbl, v_lbl in labels:
-            row = tk.Frame(btn_grid, bg="#0f121a")
-            row.pack(fill=tk.X, pady=1)
-            tk.Label(row, text=k_lbl, font=("Segoe UI", 8, "bold"), fg="#717a8e", bg="#0f121a", width=16, anchor="w").pack(side=tk.LEFT)
-            tk.Label(row, text=v_lbl, font=("Segoe UI", 8), fg="#b5bdcf", bg="#0f121a").pack(side=tk.LEFT)
+
+        for val, title, desc in bb_options:
+            rb_frame = tk.Frame(bb_card, bg="#131622")
+            rb_frame.pack(fill=tk.X, pady=2)
+            rb = tk.Radiobutton(
+                rb_frame,
+                text=title,
+                value=val,
+                variable=self.bb_var,
+                font=("Segoe UI", 8, "bold"),
+                fg="#00f09a" if val == cur_bb else "#b5bdcf",
+                bg="#131622",
+                selectcolor="#07080c",
+                activebackground="#131622",
+                activeforeground="#00f09a",
+                cursor="hand2",
+                command=self.on_bottom_button_changed
+            )
+            rb.pack(side=tk.LEFT)
+            tk.Label(rb_frame, text=f" — {desc}", font=("Segoe UI", 7), fg="#596378", bg="#131622").pack(side=tk.LEFT)
 
         # Кнопка Factory Reset
         reset_frame = tk.Frame(c_btns, bg="#0f121a")
-        reset_frame.pack(fill=tk.X, pady=(8, 0))
+        reset_frame.pack(fill=tk.X, pady=(6, 0))
 
         factory_btn = tk.Button(
             reset_frame,
@@ -1139,6 +1224,12 @@ class LamzuControlSuiteGUI:
         factory_btn.pack(fill=tk.X)
 
     # Handlers for Tab 2
+    def on_bottom_button_changed(self):
+        new_val = self.bb_var.get()
+        self.cfg["bottom_button"] = new_val
+        name = BOTTOM_BUTTON_MODES.get(new_val, {}).get("name", new_val)
+        self.auto_apply(f"Нижняя кнопка: {name}", set_mouse_bottom_button, new_val)
+
     def on_hyper_toggled(self):
         val = self.hyp_var.get()
         self.cfg["hyper_mode"] = val
@@ -1147,11 +1238,12 @@ class LamzuControlSuiteGUI:
     def on_20k_toggled(self):
         val = self.tr_var.get()
         self.cfg["tracking_20k"] = val
-        self.fps_badge.config(
-            text=" 20K FPS: ВКЛ " if val else " 20K FPS: ВЫКЛ ",
-            fg="#c084fc" if val else "#5a6275",
-            bg="#1d152b" if val else "#12141c"
-        )
+        if hasattr(self, 'fps_badge') and self.fps_badge and self.fps_badge.winfo_exists():
+            self.fps_badge.config(
+                text=" 20K FPS: ВКЛ " if val else " 20K FPS: ВЫКЛ ",
+                fg="#c084fc" if val else "#5a6275",
+                bg="#1d152b" if val else "#12141c"
+            )
         self.auto_apply(f"20K FPS Mode: {'ВКЛ' if val else 'ВЫКЛ'}", set_mouse_tracking_mode, val)
 
     def on_motion_sync_toggled(self):
@@ -1456,10 +1548,88 @@ class LamzuControlSuiteGUI:
         )
         close_btn.pack(side=tk.RIGHT)
 
+    def periodic_sync(self):
+        """Фоновый периодический опрос для поддержания актуального заряда батареи."""
+        if not self.root.winfo_exists():
+            return
+        self.update_header_battery()
+        self.root.after(3000, self.periodic_sync)
+
+    def on_hardware_event(self, event_type: str, val: Any):
+        """Обрабатывает аппаратные события, приходящие от HID прерываний мыши."""
+        try:
+            if event_type == "dpi":
+                stage_idx, dpi_x, dpi_y = val
+                self.cfg["active_dpi_stage"] = stage_idx
+                self.cfg["current_dpi"] = dpi_x
+                if self.active_tab == "performance":
+                    # Обновить карточки этапов DPI
+                    for idx, card in enumerate(self.stage_cards):
+                        is_act = (idx == stage_idx)
+                        card.config(
+                            bg="#1c2130" if is_act else "#12151f",
+                            highlightbackground="#ff3366" if is_act else "#222738",
+                            highlightthickness=2 if is_act else 1
+                        )
+                        if idx < len(self.stage_top_rows):
+                            self.stage_top_rows[idx].config(bg="#1c2130" if is_act else "#12151f")
+                        if idx < len(self.stage_title_labels):
+                            self.stage_title_labels[idx].config(
+                                bg="#1c2130" if is_act else "#12151f",
+                                fg="#ffffff" if is_act else "#717a8e"
+                            )
+                        if idx < len(self.stage_val_labels):
+                            self.stage_val_labels[idx].config(
+                                bg="#1c2130" if is_act else "#12151f",
+                                fg="#ff3366" if is_act else "#b5bdcf"
+                            )
+
+                    if hasattr(self, "dpi_heading_lbl") and self.dpi_heading_lbl.winfo_exists():
+                        self.dpi_heading_lbl.config(text=f"Регулировка DPI для активного этапа {stage_idx + 1} ({dpi_x} DPI):")
+                    if hasattr(self, "dpi_x_scale") and self.dpi_x_scale.winfo_exists():
+                        self.dpi_x_scale.set(dpi_x)
+                        self.dpi_x_lbl.config(text=str(dpi_x))
+                    if hasattr(self, "dpi_y_scale") and self.dpi_y_scale.winfo_exists():
+                        self.dpi_y_scale.set(dpi_y)
+                        self.dpi_y_lbl.config(text=str(dpi_y))
+
+            elif event_type == "rate":
+                self.cfg["polling_rate"] = val
+                if hasattr(self, "rate_var"):
+                    self.rate_var.set(val)
+
+            elif event_type == "lod":
+                self.cfg["mouse_lod"] = val
+                if hasattr(self, "lod_var"):
+                    self.lod_var.set(val)
+
+            elif event_type == "mode":
+                hs, tr = val
+                self.cfg["hyper_mode"] = hs
+                self.cfg["tracking_20k"] = tr
+                if hasattr(self, "hyp_var"):
+                    self.hyp_var.set(hs)
+                if hasattr(self, "tr_var"):
+                    self.tr_var.set(tr)
+
+            elif event_type == "bottom_button":
+                self.cfg["bottom_button"] = val
+                if hasattr(self, "bb_var"):
+                    self.bb_var.set(val)
+
+            self.show_toast(f"🔄 Синхронизировано с мыши: {event_type.upper()}")
+        except Exception as e:
+            print(f"Error updating UI on hardware event: {e}")
+
 def show_settings_dialog(on_change_callback: Optional[Callable[[str, Any], None]] = None):
+    global _current_gui_instance
     root = tk.Tk()
     app = LamzuControlSuiteGUI(root, on_change_callback)
-    root.mainloop()
+    _current_gui_instance = app
+    try:
+        root.mainloop()
+    finally:
+        _current_gui_instance = None
 
 if __name__ == "__main__":
     show_settings_dialog()
