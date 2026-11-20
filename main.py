@@ -20,7 +20,7 @@ import winreg
 import ctypes
 import threading
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Tuple
 
 import pystray
 from pystray import MenuItem as item
@@ -65,6 +65,12 @@ class MONITORINFO(ctypes.Structure):
                 ('rcMonitor', RECT),
                 ('rcWork', RECT),
                 ('dwFlags', ctypes.c_ulong)]
+
+class POINT(ctypes.Structure):
+    _fields_ = [('x', ctypes.c_long), ('y', ctypes.c_long)]
+
+class LASTINPUTINFO(ctypes.Structure):
+    _fields_ = [('cbSize', ctypes.c_uint), ('dwTime', ctypes.c_uint)]
 
 def is_fullscreen_game_active() -> bool:
     """
@@ -147,6 +153,12 @@ class LamzuTrayApp:
         self.last_switch_time: float = 0.0
         self.mode_str = f"Обычный ({self.cfg.get('stage0_rate', 1000)} Гц)"
         self.in_game = False
+
+        # Состояние сна и мгновенного пробуждения при шевелении мышью
+        self.was_in_sleep = False
+        self._last_wakeup_trigger = 0.0
+        self._last_cursor_pos: Optional[Tuple[int, int]] = None
+        self._last_input_time: int = 0
 
     def get_run_command(self) -> str:
         if getattr(sys, 'frozen', False):
@@ -342,8 +354,23 @@ class LamzuTrayApp:
                     if len(data) >= 4 and data[0] == 4:
                         report_type = data[1]
 
+                        # 0. Статус беспроводного соединения RF (1 = проснулась / на связи, 0 = ушла в сон / нет связи)
+                        if report_type == 6:
+                            link_st = data[2]
+                            if link_st == 1:
+                                self.trigger_wakeup_poll(delay=0.02)
+                            elif link_st == 0:
+                                with self.lock:
+                                    self.is_online = False
+                                    self.was_in_sleep = True
+                                    now_str = datetime.now().strftime("%H:%M:%S")
+                                    if self.last_battery is not None:
+                                        self.last_update_str = f"{self.product_name}: {self.last_battery}% (Режим ожидания / сон)\nРежим: {self.mode_str}\nОбновлено: {now_str}"
+                                self.update_tray_icon()
+                                notify_gui_hardware_change("battery", {"battery": self.last_battery, "online": False})
+
                         # 1. Нажатие физической кнопки под мышкой (Competition Mode / HyperMode)
-                        if report_type == 13:
+                        elif report_type == 13:
                             hs = (data[2] == 1)
                             tr = (data[3] == 1)
                             self.on_hardware_mode_changed(hs, tr)
@@ -355,12 +382,14 @@ class LamzuTrayApp:
                             if 1 <= bat <= 100:
                                 with self.lock:
                                     self.is_online = True
+                                    self.was_in_sleep = False
                                     self.last_battery = bat
                                     self.last_state = 1 if charging else 0
                                     state_str = "Заряжается" if charging else "Разряжается"
                                     now_str = datetime.now().strftime("%H:%M:%S")
                                     self.last_update_str = f"{self.product_name}: {bat}% ({state_str})\nРежим: {self.mode_str}\nОбновлено: {now_str}"
                                 self.update_tray_icon()
+                                notify_gui_hardware_change("battery", {"battery": bat, "charging": charging, "online": True})
 
                         # 3. Аппаратное переключение этапа DPI (DPI Loop)
                         elif report_type == 1 and len(data) >= 7:
@@ -441,6 +470,7 @@ class LamzuTrayApp:
         with self.lock:
             if status.get("online") and status.get("battery", 0) > 0:
                 self.is_online = True
+                self.was_in_sleep = False
                 self.last_battery = status["battery"]
                 self.last_state = status["state"]
                 self.product_name = status.get("product", "LAMZU Maya X")
@@ -457,16 +487,86 @@ class LamzuTrayApp:
                         )
                 else:
                     self.low_battery_warned = False
+                notify_gui_hardware_change("battery", {"battery": self.last_battery, "charging": (self.last_state == 1), "online": True})
 
             else:
                 self.is_online = False
+                self.was_in_sleep = True
                 # ВАЖНО: При сне last_battery сохраняет реальное значение (например 83%) и НЕ сбрасывается в 0!
                 if self.last_battery is not None:
                     self.last_update_str = f"{self.product_name}: {self.last_battery}% (Режим ожидания / сон)\nРежим: {self.mode_str}\nОбновлено: {now_str}"
                 else:
                     self.last_update_str = f"{self.product_name}: Поиск мыши...\nОбновлено: {now_str}"
+                notify_gui_hardware_change("battery", {"battery": self.last_battery, "online": False})
 
         self.update_tray_icon()
+
+    def trigger_wakeup_poll(self, delay: float = 0.02):
+        """
+        Мгновенно запускает последовательность опроса заряда при пробуждении мыши ото сна.
+        Вызывается при физическом движении курсора, клике или сигнале пробуждения от ресивера (RF).
+        """
+        now = time.time()
+        # Защита от избыточных повторных вызовов (debounce 1.5 сек)
+        if now - self._last_wakeup_trigger < 1.5:
+            return
+        self._last_wakeup_trigger = now
+
+        def worker():
+            if delay > 0:
+                time.sleep(delay)
+            # 1-я попытка опроса (сразу после пробуждения)
+            self.poll_battery()
+            if self.is_online:
+                return
+
+            # Если мышь ещё не успела завершить RF-рукопожатие с донглом, повторяем через 150 мс
+            time.sleep(0.15)
+            self.poll_battery()
+            if self.is_online:
+                return
+
+            # И контрольная попытка через 350 мс
+            time.sleep(0.35)
+            self.poll_battery()
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def mouse_activity_worker(self):
+        """
+        Высокоэффективный монитор активности мыши (0% CPU, 0 USB-запросов).
+        Отслеживает движение курсора и клики, пока мышь спит или офлайн.
+        Как только мышь сдвинулась после спящего режима, мгновенно считывает заряд!
+        """
+        pt = POINT()
+        lii = LASTINPUTINFO()
+        lii.cbSize = ctypes.sizeof(LASTINPUTINFO)
+
+        while self.running:
+            try:
+                # Если мышь не в сети или спит, проверяем каждые 60 мс (0% CPU)
+                sleep_sec = 0.06 if (not self.is_online or self.was_in_sleep) else 0.25
+                time.sleep(sleep_sec)
+
+                ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
+                cur_pos = (pt.x, pt.y)
+
+                ctypes.windll.user32.GetLastInputInfo(ctypes.byref(lii))
+                cur_input_time = lii.dwTime
+
+                # Проверяем, вышла ли мышь из спящего режима
+                if not self.is_online or self.was_in_sleep:
+                    if self._last_cursor_pos is not None:
+                        moved = (cur_pos != self._last_cursor_pos)
+                        clicked = (cur_input_time != self._last_input_time)
+                        if moved or clicked:
+                            # Курсор сдвинулся или нажата кнопка после сна -> МГНОВЕННО опрашиваем заряд!
+                            self.trigger_wakeup_poll(delay=0.02)
+
+                self._last_cursor_pos = cur_pos
+                self._last_input_time = cur_input_time
+            except Exception:
+                time.sleep(0.5)
 
     def update_tray_icon(self):
         if not self.icon:
@@ -754,6 +854,7 @@ class LamzuTrayApp:
         threading.Thread(target=self.battery_worker, daemon=True).start()
         threading.Thread(target=self.notification_listener_worker, daemon=True).start()
         threading.Thread(target=self.button_sync_worker, daemon=True).start()
+        threading.Thread(target=self.mouse_activity_worker, daemon=True).start()
 
         self.icon.run()
 

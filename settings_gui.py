@@ -1617,7 +1617,21 @@ class LamzuControlSuiteGUI:
                 if hasattr(self, "bb_var"):
                     self.bb_var.set(val)
 
-            self.show_toast(f"🔄 Синхронизировано с мыши: {event_type.upper()}")
+            elif event_type == "battery":
+                bat_data = val
+                bat = bat_data.get("battery")
+                online = bat_data.get("online", True)
+                charging = bat_data.get("charging", False)
+                if hasattr(self, "bat_lbl") and self.bat_lbl.winfo_exists():
+                    if online and bat is not None:
+                        st_str = "⚡ Зарядка" if charging else "Разряжается"
+                        color = "#00f09a" if bat > 25 else "#ff4d6d"
+                        self.bat_lbl.config(text=f"🔋 {bat}% ({st_str})", fg=color)
+                    elif bat is not None:
+                        self.bat_lbl.config(text=f"💤 {bat}% (Ожидание)", fg="#717a8e")
+
+            if event_type != "battery":
+                self.show_toast(f"🔄 Синхронизировано с мыши: {event_type.upper()}")
         except Exception as e:
             print(f"Error updating UI on hardware event: {e}")
 
