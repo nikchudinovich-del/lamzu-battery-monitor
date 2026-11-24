@@ -53,6 +53,7 @@ def get_install_dir():
 def kill_running_app():
     try:
         subprocess.run(["taskkill", "/f", "/im", f"{APP_NAME}.exe"], capture_output=True)
+        time.sleep(0.3)
     except Exception:
         pass
 
@@ -101,7 +102,16 @@ def perform_install(progress_callback=None):
         if os.path.exists(scratch_exe):
             source_exe = scratch_exe
 
-    shutil.copy2(source_exe, dest_exe)
+    copied = False
+    for _ in range(5):
+        try:
+            shutil.copy2(source_exe, dest_exe)
+            copied = True
+            break
+        except Exception:
+            time.sleep(0.25)
+    if not copied:
+        shutil.copy2(source_exe, dest_exe)
 
     source_ico = os.path.join(bundle_dir, "app_icon.ico")
     dest_ico = os.path.join(install_dir, "app_icon.ico")

@@ -103,12 +103,14 @@ def send_aurora_cmd(path: bytes, category: int, opcode: int, p6: int = 1, p7: in
         # Повторная попытка с обновленным путем, если порт сменился
         new_path = get_control_device_path(force_refresh=True)
         if not new_path or new_path == path:
+            _cached_control_path = None
             return None
         try:
             h.open_path(new_path)
             h.set_nonblocking(True)
             path = new_path
         except Exception:
+            _cached_control_path = None
             return None
 
     try:
@@ -155,12 +157,14 @@ def query_aurora_battery(device_path: bytes) -> Optional[Tuple[int, int]]:
     except Exception:
         new_path = get_control_device_path(force_refresh=True)
         if not new_path or new_path == device_path:
+            _cached_control_path = None
             return None
         try:
             h.open_path(new_path)
             h.set_nonblocking(True)
             device_path = new_path
         except Exception:
+            _cached_control_path = None
             return None
 
     try:

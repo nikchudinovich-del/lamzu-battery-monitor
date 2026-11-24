@@ -159,6 +159,7 @@ class LamzuTrayApp:
         self._last_wakeup_trigger = 0.0
         self._last_cursor_pos: Optional[Tuple[int, int]] = None
         self._last_input_time: int = 0
+        self._last_poll_time: float = 0.0
 
     def get_run_command(self) -> str:
         if getattr(sys, 'frozen', False):
@@ -432,6 +433,10 @@ class LamzuTrayApp:
                 if not self.cfg.get("auto_sync_button", True):
                     continue
 
+                if not self.is_online:
+                    time.sleep(1.0)
+                    continue
+
                 curr_hyper = get_mouse_hyper_mode()
                 if curr_hyper is None:
                     continue
@@ -464,6 +469,7 @@ class LamzuTrayApp:
 
     def poll_battery(self):
         """Опрос батареи с защитой от сброса в 0% при сне."""
+        self._last_poll_time = time.time()
         status = get_lamzu_status()
         now_str = datetime.now().strftime("%H:%M:%S")
 
@@ -558,9 +564,17 @@ class LamzuTrayApp:
                 if not self.is_online or self.was_in_sleep:
                     if self._last_cursor_pos is not None:
                         moved = (cur_pos != self._last_cursor_pos)
-                        clicked = (cur_input_time != self._last_input_time)
-                        if moved or clicked:
-                            # Курсор сдвинулся или нажата кнопка после сна -> МГНОВЕННО опрашиваем заряд!
+                        # Проверяем строго клики мыши (LMB, RMB, MMB, XBUTTON1, XBUTTON2)
+                        user32 = ctypes.windll.user32
+                        mouse_clicked = bool(
+                            (user32.GetAsyncKeyState(0x01) & 0x8000) or
+                            (user32.GetAsyncKeyState(0x02) & 0x8000) or
+                            (user32.GetAsyncKeyState(0x04) & 0x8000) or
+                            (user32.GetAsyncKeyState(0x05) & 0x8000) or
+                            (user32.GetAsyncKeyState(0x06) & 0x8000)
+                        )
+                        if moved or mouse_clicked:
+                            # Курсор сдвинулся или нажата кнопка мыши после сна -> МГНОВЕННО опрашиваем заряд!
                             self.trigger_wakeup_poll(delay=0.02)
 
                 self._last_cursor_pos = cur_pos
@@ -596,7 +610,6 @@ class LamzuTrayApp:
     def battery_worker(self):
         self.poll_battery()
         was_in_game = False
-        elapsed = 0
 
         while self.running:
             time.sleep(1)
@@ -610,7 +623,6 @@ class LamzuTrayApp:
             if was_in_game and not in_game:
                 was_in_game = False
                 self.in_game = False
-                elapsed = 0
                 # Мгновенно опрашиваем заряд при выходе / Alt-Tab!
                 self.poll_battery()
                 continue
@@ -620,12 +632,10 @@ class LamzuTrayApp:
 
             if in_game:
                 # В игре: опрос батареи полностью остановлен (0% нагрузки, 0 радиопомех)
-                elapsed = 0
                 continue
 
-            elapsed += 1
-            if elapsed >= poll_interval:
-                elapsed = 0
+            # Проверяем, сколько времени прошло с последнего опроса
+            if time.time() - self._last_poll_time >= poll_interval:
                 self.poll_battery()
 
     def format_sleep(self, sec: int) -> str:

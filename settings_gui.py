@@ -502,13 +502,18 @@ class LamzuControlSuiteGUI:
             p = get_control_device_path()
             if p:
                 res = query_aurora_battery(p)
-                if res:
+                if res and self.root.winfo_exists():
                     bat, st = res
                     st_str = "⚡ Зарядка" if st == 1 else "Разряжается"
                     color = "#00f09a" if bat > 25 else "#ff4d6d"
                     self.root.after(0, lambda: self.bat_lbl.config(
                         text=f"🔋 {bat}% ({st_str})",
                         fg=color
+                    ))
+                elif self.root.winfo_exists():
+                    self.root.after(0, lambda: self.bat_lbl.config(
+                        text="💤 Мышь в спящем режиме",
+                        fg="#717a8e"
                     ))
         threading.Thread(target=worker, daemon=True).start()
 
