@@ -38,6 +38,7 @@ from lamzu_battery import (
     get_mouse_sleep_time,
     set_mouse_sleep_time,
     get_mouse_dpi,
+    get_mouse_dpi_detailed,
     set_mouse_dpi,
     get_mouse_led_color,
     set_mouse_led_color,
@@ -647,15 +648,27 @@ class LamzuTrayApp:
         """Считывает текущее состояние мыши при запуске БЕЗ перезаписи параметров."""
         def worker():
             try:
-                live_dpi = get_mouse_dpi()
-                if live_dpi:
-                    self.cfg["current_dpi"] = live_dpi
+                dpi_info = get_mouse_dpi_detailed()
+                if dpi_info and dpi_info.get("stages"):
+                    act_idx = dpi_info.get("active_index", 0)
+                    stages = dpi_info["stages"]
+                    self.cfg["active_dpi_stage"] = act_idx
+                    self.cfg["dpi_stages"] = stages
+                    self.cfg["stage_count"] = len(stages)
+                    if 0 <= act_idx < len(stages):
+                        self.cfg["current_dpi"] = stages[act_idx]["x"]
+                else:
+                    live_dpi = get_mouse_dpi()
+                    if live_dpi:
+                        self.cfg["current_dpi"] = live_dpi
+
                 live_lod = get_mouse_lod()
                 if live_lod:
                     self.cfg["mouse_lod"] = live_lod
                 live_sleep = get_mouse_sleep_time()
                 if live_sleep:
                     self.cfg["mouse_sleep_time"] = live_sleep
+                save_config(self.cfg)
                 self.update_tray_icon()
             except Exception:
                 pass
@@ -808,7 +821,13 @@ class LamzuTrayApp:
                 items.append(item(name, make_handler(r, g, b)))
             return pystray.Menu(*items)
 
-        current_dpi = self.cfg.get("current_dpi", 800)
+        def get_display_dpi():
+            stages = self.cfg.get("dpi_stages", [])
+            act_idx = self.cfg.get("active_dpi_stage", 0)
+            if stages and 0 <= act_idx < len(stages):
+                return stages[act_idx].get("x", self.cfg.get("current_dpi", 800))
+            return self.cfg.get("current_dpi", 800)
+
         current_lod = self.cfg.get("mouse_lod", 1.0)
         current_sleep = self.format_sleep(self.cfg.get("mouse_sleep_time", 60))
 
@@ -824,7 +843,7 @@ class LamzuTrayApp:
                 enabled=False
             ),
             item(
-                lambda text: f"DPI: {self.cfg.get('current_dpi', 800)}  |  LOD: {self.cfg.get('mouse_lod', 1.0)} мм  |  Сон: {self.format_sleep(self.cfg.get('mouse_sleep_time', 60))}",
+                lambda text: f"DPI: {get_display_dpi()}  |  LOD: {self.cfg.get('mouse_lod', 1.0)} мм  |  Сон: {self.format_sleep(self.cfg.get('mouse_sleep_time', 60))}",
                 lambda icon, item: None,
                 enabled=False
             ),

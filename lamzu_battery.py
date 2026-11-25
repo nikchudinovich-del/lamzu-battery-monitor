@@ -517,71 +517,13 @@ def set_mouse_sleep_time(seconds: int, path: Optional[bytes] = None) -> bool:
 
 def get_mouse_dpi(path: Optional[bytes] = None) -> Optional[int]:
     """Возвращает текущий активный DPI мыши."""
-    p = path or get_control_device_path()
-    if not p:
-        return None
-
-    h = hid.device()
-    try:
-        h.open_path(p)
-        h.set_nonblocking(True)
-    except Exception:
-        return None
-
-    try:
-        # 1. Получаем активный номер этапа DPI (0..4)
-        q_act = bytearray(65)
-        q_act[3] = 2; q_act[4] = 2; q_act[5] = 1; q_act[6] = 130; q_act[7] = 1
-        h.send_feature_report(q_act)
-        time.sleep(0.02)
-        active_stage = None
-        for _ in range(5):
-            for _ in range(25):
-                r = h.get_feature_report(0, 65)
-                if r and len(r) > 8 and r[1] == 0xa1 and r[6] == 130:
-                    active_stage = r[8]
-                    break
-                time.sleep(0.01)
-            if active_stage is not None:
-                break
-            h.send_feature_report(q_act)
-            time.sleep(0.015)
-
-        if active_stage is None:
-            active_stage = 0
-
-        # 2. Получаем список значений этапов DPI
-        q_dpi = bytearray(65)
-        q_dpi[3] = 2; q_dpi[4] = 10; q_dpi[5] = 1; q_dpi[6] = 129; q_dpi[7] = 1; q_dpi[8] = 5
-        h.send_feature_report(q_dpi)
-        time.sleep(0.02)
-        dpis = []
-        for _ in range(5):
-            for _ in range(25):
-                r = h.get_feature_report(0, 65)
-                if r and len(r) > 8 and r[1] == 0xa1 and r[6] == 129:
-                    cnt = r[8]
-                    for i in range(cnt):
-                        val = (r[9 + i * 4] << 8) | r[10 + i * 4]
-                        dpis.append(val)
-                    break
-                time.sleep(0.01)
-            if dpis:
-                break
-            h.send_feature_report(q_dpi)
-            time.sleep(0.015)
-
-        if dpis and active_stage < len(dpis):
-            return dpis[active_stage]
-        elif dpis:
-            return dpis[0]
-    except Exception:
-        pass
-    finally:
-        try:
-            h.close()
-        except Exception:
-            pass
+    info = get_mouse_dpi_detailed(path)
+    if info and info.get("stages"):
+        idx = info.get("active_index", 0)
+        stages = info["stages"]
+        if 0 <= idx < len(stages):
+            return stages[idx]["x"]
+        return stages[0]["x"]
     return None
 
 def set_mouse_dpi(dpi: int, path: Optional[bytes] = None) -> bool:
@@ -1011,7 +953,7 @@ def get_mouse_dpi_detailed(path: Optional[bytes] = None) -> Optional[Dict[str, A
         active_idx = 0
         for _ in range(15):
             r = h.get_feature_report(0, 65)
-            if r and len(r) > 8 and r[6] == 130:
+            if r and len(r) > 8 and r[1] == 0xa1 and r[6] == 130:
                 raw_act = r[8]
                 # Аппаратный индекс этапа 1-based (1..cnt), приводим к 0-based для GUI
                 active_idx = max(0, raw_act - 1) if raw_act >= 1 else 0
@@ -1025,7 +967,7 @@ def get_mouse_dpi_detailed(path: Optional[bytes] = None) -> Optional[Dict[str, A
         xy_split = False
         for _ in range(15):
             r = h.get_feature_report(0, 65)
-            if r and len(r) > 8 and r[6] == 141:
+            if r and len(r) > 8 and r[1] == 0xa1 and r[6] == 141:
                 xy_split = (r[8] == 1)
                 break
             time.sleep(0.01)
@@ -1037,14 +979,18 @@ def get_mouse_dpi_detailed(path: Optional[bytes] = None) -> Optional[Dict[str, A
         stages = []
         for _ in range(25):
             r = h.get_feature_report(0, 65)
-            if r and len(r) > 8 and r[6] == 129 and r[5] == 1:
+            if r and len(r) > 8 and r[1] == 0xa1 and r[6] == 129 and r[5] == 1:
                 cnt = r[8]
                 for i in range(cnt):
                     x = (r[9 + i*4] << 8) | r[10 + i*4]
                     y = (r[11 + i*4] << 8) | r[12 + i*4]
-                    stages.append({"x": x, "y": y})
+                    if x > 0 and y > 0:
+                        stages.append({"x": x, "y": y})
                 break
             time.sleep(0.01)
+
+        if not stages:
+            return None
 
         # 4. getDPIStageColors
         cmd_col = bytearray(65); cmd_col[3]=2; cmd_col[4]=19; cmd_col[5]=2; cmd_col[6]=129; cmd_col[7]=1
